@@ -61,7 +61,7 @@ func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
 	h.lock.Unlock()
 
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(fmt.Sprintf("http://localhost:8080/%d\r\n", key)))
+	w.Write([]byte(fmt.Sprintf("http://localhost:8080/%d", key)))
 }
 
 func (h *URLShortener) getURL(w http.ResponseWriter, r *http.Request) {
