@@ -4,35 +4,24 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestURLShortener_ServeHTTP(t *testing.T) {
-	type fields struct {
-		urls map[uint64]*url.URL
-		lock sync.RWMutex
-	}
 	type args struct {
 		w *httptest.ResponseRecorder
 		r *http.Request
 	}
 	tests := []struct {
 		name         string
-		fields       fields
 		args         args
 		expectedCode int
 	}{
 		{
 			name: "patch check",
-			fields: fields{
-				urls: make(map[uint64]*url.URL),
-				lock: sync.RWMutex{},
-			},
 			args: args{
 				w: httptest.NewRecorder(),
 				r: httptest.NewRequest(http.MethodPatch, "/", nil),
@@ -40,12 +29,10 @@ func TestURLShortener_ServeHTTP(t *testing.T) {
 			expectedCode: http.StatusBadRequest,
 		},
 	}
+
+	h := NewURLShortener()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := &URLShortener{
-				urls: tt.fields.urls,
-				lock: tt.fields.lock,
-			}
 			h.ServeHTTP(tt.args.w, tt.args.r)
 			result := tt.args.w.Result()
 
@@ -110,26 +97,17 @@ func TestURLShortener_getURL(t *testing.T) {
 }
 
 func TestURLShortener_shorten(t *testing.T) {
-	type fields struct {
-		urls map[uint64]*url.URL
-		lock sync.RWMutex
-	}
 	type args struct {
 		w *httptest.ResponseRecorder
 		r *http.Request
 	}
 	tests := []struct {
 		name     string
-		fields   fields
 		args     args
 		expected string
 	}{
 		{
 			name: "Shortener check #1",
-			fields: fields{
-				urls: make(map[uint64]*url.URL),
-				lock: sync.RWMutex{},
-			},
 			args: args{
 				w: httptest.NewRecorder(),
 				r: httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://ya.ru")),
@@ -138,10 +116,6 @@ func TestURLShortener_shorten(t *testing.T) {
 		},
 		{
 			name: "Shortener check #2",
-			fields: fields{
-				urls: make(map[uint64]*url.URL),
-				lock: sync.RWMutex{},
-			},
 			args: args{
 				w: httptest.NewRecorder(),
 				r: httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://vc.ru")),
@@ -149,12 +123,10 @@ func TestURLShortener_shorten(t *testing.T) {
 			expected: "http://example.com/4506343413788829418",
 		},
 	}
+
+	h := NewURLShortener()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := &URLShortener{
-				urls: tt.fields.urls,
-				lock: tt.fields.lock,
-			}
 			h.ServeHTTP(tt.args.w, tt.args.r)
 			result := tt.args.w.Result()
 
