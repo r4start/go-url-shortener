@@ -8,34 +8,29 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type URLShortener struct {
+	*chi.Mux
 	urls map[uint64]*url.URL
 	lock sync.RWMutex
 }
 
 func NewURLShortener() *URLShortener {
-	return &URLShortener{urls: make(map[uint64]*url.URL), lock: sync.RWMutex{}}
-}
+	handler := &URLShortener{Mux: chi.NewMux(), urls: make(map[uint64]*url.URL), lock: sync.RWMutex{}}
+	handler.Get("/{id}", handler.getURL)
+	handler.Post("/", handler.shorten)
 
-func (h *URLShortener) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		h.getURL(w, r)
-	case http.MethodPost:
-		h.shorten(w, r)
-	default:
+	handler.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusBadRequest)
-	}
+	})
+
+	return handler
 }
 
 func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
-	if r.URL.RequestURI() != "/" {
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-
 	b, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
@@ -65,7 +60,7 @@ func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *URLShortener) getURL(w http.ResponseWriter, r *http.Request) {
-	key, err := strconv.ParseUint(r.URL.RequestURI()[1:], 10, 64)
+	key, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "", http.StatusBadRequest)
 		return
