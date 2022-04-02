@@ -4,22 +4,21 @@ import (
 	"encoding/base64"
 	"fmt"
 	"github.com/go-chi/chi/v5"
-	"hash/fnv"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
-	"sync"
+
+	"github.com/r4start/go-url-shortener/internal/storage"
 )
 
 type URLShortener struct {
 	*chi.Mux
-	urls map[uint64]*url.URL
-	lock sync.RWMutex
+	urlStorage storage.URLStorage
 }
 
 func NewURLShortener() *URLShortener {
-	handler := &URLShortener{Mux: chi.NewMux(), urls: make(map[uint64]*url.URL), lock: sync.RWMutex{}}
+	handler := &URLShortener{Mux: chi.NewMux(), urlStorage: storage.NewInMemoryStorage()}
 	handler.Get("/{id}", handler.getURL)
 	handler.Post("/", handler.shorten)
 
@@ -43,17 +42,11 @@ func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hasher := fnv.New64()
-	_, err = hasher.Write(b)
+	key, err := h.urlStorage.Add(u.String())
 	if err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
-	key := hasher.Sum64()
-
-	h.lock.Lock()
-	h.urls[key] = u
-	h.lock.Unlock()
 
 	keyData := []byte(strconv.FormatUint(key, 16))
 	dst := make([]byte, base64.RawURLEncoding.EncodedLen(len(keyData)))
@@ -75,17 +68,13 @@ func (h *URLShortener) getURL(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusBadRequest)
 		return
 	}
-	var u url.URL
-	h.lock.RLock()
-	if v, ok := h.urls[key]; ok {
-		u = *v
-	} else {
-		h.lock.RUnlock()
+
+	u, err := h.urlStorage.Get(key)
+	if err != nil {
 		http.Error(w, "", http.StatusNotFound)
 		return
 	}
-	h.lock.RUnlock()
 
-	w.Header().Set("Location", u.String())
+	w.Header().Set("Location", u)
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
