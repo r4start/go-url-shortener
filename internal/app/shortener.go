@@ -38,7 +38,7 @@ func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u, err := url.Parse(string(b))
-	if err != nil {
+	if err != nil || len(u.Hostname()) == 0 {
 		http.Error(w, "", http.StatusBadRequest)
 		return
 	}

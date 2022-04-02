@@ -21,7 +21,7 @@ func TestURLShortener_ServeHTTP(t *testing.T) {
 		expectedCode int
 	}{
 		{
-			name: "patch check",
+			name: "Invalid method check #1",
 			args: args{
 				w: httptest.NewRecorder(),
 				r: httptest.NewRequest(http.MethodPatch, "/", nil),
@@ -43,57 +43,50 @@ func TestURLShortener_ServeHTTP(t *testing.T) {
 }
 
 func TestURLShortener_getURL(t *testing.T) {
-	type args struct {
-		w            *httptest.ResponseRecorder
-		r            *http.Request
-		expectedCode int
-	}
 	tests := []struct {
-		name string
-		args []args
+		name     string
+		checkURL string
 	}{
 		{
-			name: "Shortener check #1",
-			args: []args{
-				{
-					w:            httptest.NewRecorder(),
-					r:            httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://ya.ru")),
-					expectedCode: http.StatusCreated,
-				},
-				{
-					w:            httptest.NewRecorder(),
-					r:            httptest.NewRequest(http.MethodGet, "/17627783340430073139", nil),
-					expectedCode: http.StatusTemporaryRedirect,
-				},
-			},
+			name:     "Shortener check #1",
+			checkURL: "https://ya.ru",
 		},
 		{
-			name: "Shortener check #2",
-			args: []args{
-				{
-					w:            httptest.NewRecorder(),
-					r:            httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://vc.ru")),
-					expectedCode: http.StatusCreated,
-				},
-				{
-					w:            httptest.NewRecorder(),
-					r:            httptest.NewRequest(http.MethodGet, "/4506343413788829418", strings.NewReader("https://vc.ru")),
-					expectedCode: http.StatusTemporaryRedirect,
-				},
-			},
+			name:     "Shortener check #2",
+			checkURL: "https://vc.ru",
+		},
+		{
+			name:     "Shortener check #3",
+			checkURL: "https://lenta.com.ru",
 		},
 	}
 
 	h := NewURLShortener()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, a := range tt.args {
-				h.ServeHTTP(a.w, a.r)
-				result := a.w.Result()
-				defer result.Body.Close()
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.checkURL))
 
-				assert.Equal(t, a.expectedCode, result.StatusCode)
+			h.ServeHTTP(w, r)
+			result := w.Result()
+
+			defer result.Body.Close()
+			resBody, err := io.ReadAll(result.Body)
+			if err != nil {
+				t.Fatal(err)
 			}
+
+			assert.Equal(t, http.StatusCreated, result.StatusCode)
+
+			w = httptest.NewRecorder()
+			r = httptest.NewRequest(http.MethodGet, string(resBody), nil)
+
+			h.ServeHTTP(w, r)
+			result = w.Result()
+			defer result.Body.Close()
+
+			assert.Equal(t, http.StatusTemporaryRedirect, result.StatusCode)
+			assert.Equal(t, tt.checkURL, result.Header.Get("Location"))
 		})
 	}
 }
@@ -103,10 +96,14 @@ func TestURLShortener_shorten(t *testing.T) {
 		w *httptest.ResponseRecorder
 		r *http.Request
 	}
+	type expected struct {
+		expectedCode int
+		expectedURL  string
+	}
 	tests := []struct {
-		name     string
-		args     args
-		expected string
+		name string
+		args args
+		expected
 	}{
 		{
 			name: "Shortener check #1",
@@ -114,7 +111,10 @@ func TestURLShortener_shorten(t *testing.T) {
 				w: httptest.NewRecorder(),
 				r: httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://ya.ru")),
 			},
-			expected: "http://example.com/17627783340430073139",
+			expected: expected{
+				expectedCode: http.StatusCreated,
+				expectedURL:  "http://example.com/ZjRhMjc3OGQ1N2UyMWQzMw",
+			},
 		},
 		{
 			name: "Shortener check #2",
@@ -122,7 +122,43 @@ func TestURLShortener_shorten(t *testing.T) {
 				w: httptest.NewRecorder(),
 				r: httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://vc.ru")),
 			},
-			expected: "http://example.com/4506343413788829418",
+			expected: expected{
+				expectedCode: http.StatusCreated,
+				expectedURL:  "http://example.com/M2U4OWJmNzU4ZWNkZTZlYQ",
+			},
+		},
+		{
+			name: "Shortener check #3",
+			args: args{
+				w: httptest.NewRecorder(),
+				r: httptest.NewRequest(http.MethodPost, "/", strings.NewReader("vc.ru")),
+			},
+			expected: expected{
+				expectedCode: http.StatusBadRequest,
+				expectedURL:  "",
+			},
+		},
+		{
+			name: "Shortener check #4",
+			args: args{
+				w: httptest.NewRecorder(),
+				r: httptest.NewRequest(http.MethodPost, "/", strings.NewReader("kajsdhkashd")),
+			},
+			expected: expected{
+				expectedCode: http.StatusBadRequest,
+				expectedURL:  "",
+			},
+		},
+		{
+			name: "Shortener check #5",
+			args: args{
+				w: httptest.NewRecorder(),
+				r: httptest.NewRequest(http.MethodPost, "/", strings.NewReader("")),
+			},
+			expected: expected{
+				expectedCode: http.StatusBadRequest,
+				expectedURL:  "",
+			},
 		},
 	}
 
@@ -138,7 +174,10 @@ func TestURLShortener_shorten(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			assert.Equal(t, tt.expected, string(resBody))
+			assert.Equal(t, tt.expectedCode, result.StatusCode)
+			if result.StatusCode == http.StatusCreated {
+				assert.Equal(t, tt.expectedURL, string(resBody))
+			}
 		})
 	}
 }
