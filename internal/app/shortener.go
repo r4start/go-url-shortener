@@ -1,15 +1,15 @@
 package app
 
 import (
+	"encoding/base64"
 	"fmt"
+	"github.com/go-chi/chi/v5"
 	"hash/fnv"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"sync"
-
-	"github.com/go-chi/chi/v5"
 )
 
 type URLShortener struct {
@@ -55,12 +55,22 @@ func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
 	h.urls[key] = u
 	h.lock.Unlock()
 
+	keyData := []byte(strconv.FormatUint(key, 16))
+	dst := make([]byte, base64.RawURLEncoding.EncodedLen(len(keyData)))
+	base64.RawURLEncoding.Encode(dst, keyData)
+
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(fmt.Sprintf("http://%s/%d", r.Host, key)))
+	w.Write([]byte(fmt.Sprintf("http://%s/%s", r.Host, string(dst))))
 }
 
 func (h *URLShortener) getURL(w http.ResponseWriter, r *http.Request) {
-	key, err := strconv.ParseUint(chi.URLParam(r, "id"), 10, 64)
+	keyData := chi.URLParam(r, "id")
+	decodedKey, err := base64.RawURLEncoding.DecodeString(keyData)
+	if err != nil {
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+	key, err := strconv.ParseUint(string(decodedKey), 16, 64)
 	if err != nil {
 		http.Error(w, "", http.StatusBadRequest)
 		return

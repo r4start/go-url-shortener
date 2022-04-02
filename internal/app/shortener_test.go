@@ -35,6 +35,7 @@ func TestURLShortener_ServeHTTP(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h.ServeHTTP(tt.args.w, tt.args.r)
 			result := tt.args.w.Result()
+			defer result.Body.Close()
 
 			assert.Equal(t, tt.expectedCode, result.StatusCode)
 		})
@@ -89,6 +90,7 @@ func TestURLShortener_getURL(t *testing.T) {
 			for _, a := range tt.args {
 				h.ServeHTTP(a.w, a.r)
 				result := a.w.Result()
+				defer result.Body.Close()
 
 				assert.Equal(t, a.expectedCode, result.StatusCode)
 			}
