@@ -38,7 +38,6 @@ func (s *syncMapStorage) Get(id uint64) (string, error) {
 	defer s.lock.RUnlock()
 	if v, ok := s.urls[id]; ok {
 		return v, nil
-	} else {
-		return "", errors.New("not found")
 	}
+	return "", errors.New("not found")
 }
