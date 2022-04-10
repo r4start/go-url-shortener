@@ -181,3 +181,95 @@ func TestURLShortener_shorten(t *testing.T) {
 		})
 	}
 }
+
+func TestURLShortener_apiShortener(t *testing.T) {
+	type args struct {
+		w *httptest.ResponseRecorder
+		r *http.Request
+	}
+	type expected struct {
+		expectedCode     int
+		expectedResponse string
+	}
+	tests := []struct {
+		name string
+		args args
+		expected
+	}{
+		{
+			name: "Shortener check #1",
+			args: args{
+				w: httptest.NewRecorder(),
+				r: httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(`{"url":"http://ya.ru"}`)),
+			},
+			expected: expected{
+				expectedCode:     http.StatusCreated,
+				expectedResponse: `{"result":"http://example.com/ZDIyNDk4MzQzMGZmMDQ1ZQ"}`,
+			},
+		},
+		{
+			name: "Shortener check #2",
+			args: args{
+				w: httptest.NewRecorder(),
+				r: httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(`{"url":"http://vc.ru"}`)),
+			},
+			expected: expected{
+				expectedCode:     http.StatusCreated,
+				expectedResponse: `{"result":"http://example.com/NWI4NTMwNmZjNWJmMjMzYg"}`,
+			},
+		},
+		{
+			name: "Shortener check #3",
+			args: args{
+				w: httptest.NewRecorder(),
+				r: httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader("vc.ru")),
+			},
+			expected: expected{
+				expectedCode:     http.StatusBadRequest,
+				expectedResponse: "",
+			},
+		},
+		{
+			name: "Shortener check #4",
+			args: args{
+				w: httptest.NewRecorder(),
+				r: httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader("kajsdhkashd")),
+			},
+			expected: expected{
+				expectedCode:     http.StatusBadRequest,
+				expectedResponse: "",
+			},
+		},
+		{
+			name: "Shortener check #5",
+			args: args{
+				w: httptest.NewRecorder(),
+				r: httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader("")),
+			},
+			expected: expected{
+				expectedCode:     http.StatusBadRequest,
+				expectedResponse: "",
+			},
+		},
+	}
+
+	h := NewURLShortener()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.args.r.Header.Set("content-type", "application/json")
+			h.ServeHTTP(tt.args.w, tt.args.r)
+			result := tt.args.w.Result()
+
+			defer result.Body.Close()
+			resBody, err := io.ReadAll(result.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			assert.Equal(t, tt.expectedCode, result.StatusCode)
+			if result.StatusCode == http.StatusCreated {
+				assert.Equal(t, tt.expectedResponse, string(resBody))
+			}
+		})
+	}
+}
