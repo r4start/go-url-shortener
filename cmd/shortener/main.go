@@ -9,8 +9,9 @@ import (
 )
 
 type config struct {
-	ServerAddress string `env:"SERVER_ADDRESS" envDefault:":8080"`
-	BaseURL       string `env:"BASE_URL"`
+	ServerAddress   string `env:"SERVER_ADDRESS" envDefault:":8080"`
+	BaseURL         string `env:"BASE_URL"`
+	FileStoragePath string `env:"FILE_STORAGE_PATH"`
 }
 
 func main() {
@@ -21,7 +22,11 @@ func main() {
 		return
 	}
 
-	handler := app.NewURLShortener(cfg.BaseURL)
+	handler, err := app.NewURLShortener(cfg.BaseURL, cfg.FileStoragePath)
+	if err != nil {
+		panic(err)
+	}
+
 	server := &http.Server{Addr: cfg.ServerAddress, Handler: handler}
 	server.ListenAndServe()
 }

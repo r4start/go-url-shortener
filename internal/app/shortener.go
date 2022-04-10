@@ -20,12 +20,22 @@ type URLShortener struct {
 	domain     string
 }
 
-func DefaultURLShortener() *URLShortener {
-	return NewURLShortener("")
+func DefaultURLShortener() (*URLShortener, error) {
+	return NewURLShortener("", "")
 }
 
-func NewURLShortener(domain string) *URLShortener {
-	handler := &URLShortener{Mux: chi.NewMux(), urlStorage: storage.NewInMemoryStorage(), domain: domain}
+func NewURLShortener(domain, fileStoragePath string) (*URLShortener, error) {
+	var st storage.URLStorage
+	if len(fileStoragePath) != 0 {
+		var err error
+		st, err = storage.NewFileStorage(fileStoragePath)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		st = storage.NewInMemoryStorage()
+	}
+	handler := &URLShortener{Mux: chi.NewMux(), urlStorage: st, domain: domain}
 	handler.Get("/{id}", handler.getURL)
 	handler.Post("/", handler.shorten)
 	handler.Post("/api/shorten", handler.apiShortener)
@@ -34,7 +44,7 @@ func NewURLShortener(domain string) *URLShortener {
 		http.Error(w, "", http.StatusBadRequest)
 	})
 
-	return handler
+	return handler, nil
 }
 
 func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +136,7 @@ func (h *URLShortener) generateShortID(data string) ([]byte, error) {
 		return nil, errors.New("bad input data")
 	}
 
-	key, err := h.urlStorage.Add(u.String())
+	key, _, err := h.urlStorage.Add(u.String())
 	if err != nil {
 		return nil, err
 	}

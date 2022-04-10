@@ -30,7 +30,8 @@ func TestURLShortener_ServeHTTP(t *testing.T) {
 		},
 	}
 
-	h := DefaultURLShortener()
+	h, err := DefaultURLShortener()
+	assert.Nil(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h.ServeHTTP(tt.args.w, tt.args.r)
@@ -61,7 +62,8 @@ func TestURLShortener_getURL(t *testing.T) {
 		},
 	}
 
-	h := DefaultURLShortener()
+	h, err := DefaultURLShortener()
+	assert.Nil(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
@@ -162,7 +164,8 @@ func TestURLShortener_shorten(t *testing.T) {
 		},
 	}
 
-	h := DefaultURLShortener()
+	h, err := DefaultURLShortener()
+	assert.Nil(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h.ServeHTTP(tt.args.w, tt.args.r)
@@ -253,7 +256,8 @@ func TestURLShortener_apiShortener(t *testing.T) {
 		},
 	}
 
-	h := DefaultURLShortener()
+	h, err := DefaultURLShortener()
+	assert.Nil(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.args.r.Header.Set("content-type", "application/json")
