@@ -1,11 +1,10 @@
 package main
 
 import (
-	"fmt"
-	"github.com/caarlos0/env/v6"
+	"flag"
 	"github.com/r4start/go-url-shortener/internal/app"
-
 	"net/http"
+	"os"
 )
 
 type config struct {
@@ -17,9 +16,14 @@ type config struct {
 func main() {
 	cfg := config{}
 
-	if err := env.Parse(&cfg); err != nil {
-		fmt.Printf("%+v\n", err)
-		return
+	flag.StringVar(&cfg.ServerAddress, "a", os.Getenv("SERVER_ADDRESS"), "")
+	flag.StringVar(&cfg.BaseURL, "b", os.Getenv("BASE_URL"), "")
+	flag.StringVar(&cfg.FileStoragePath, "f", os.Getenv("FILE_STORAGE_PATH"), "")
+
+	flag.Parse()
+
+	if len(cfg.ServerAddress) == 0 {
+		cfg.ServerAddress = ":8080"
 	}
 
 	handler, err := app.NewURLShortener(cfg.BaseURL, cfg.FileStoragePath)
