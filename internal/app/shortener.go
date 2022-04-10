@@ -17,10 +17,15 @@ import (
 type URLShortener struct {
 	*chi.Mux
 	urlStorage storage.URLStorage
+	domain     string
 }
 
-func NewURLShortener() *URLShortener {
-	handler := &URLShortener{Mux: chi.NewMux(), urlStorage: storage.NewInMemoryStorage()}
+func DefaultURLShortener() *URLShortener {
+	return NewURLShortener("")
+}
+
+func NewURLShortener(domain string) *URLShortener {
+	handler := &URLShortener{Mux: chi.NewMux(), urlStorage: storage.NewInMemoryStorage(), domain: domain}
 	handler.Get("/{id}", handler.getURL)
 	handler.Post("/", handler.shorten)
 	handler.Post("/api/shorten", handler.apiShortener)
@@ -39,14 +44,14 @@ func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dst, err := h.makeShortURL(string(b))
+	dst, err := h.generateShortID(string(b))
 	if err != nil {
 		http.Error(w, "", http.StatusBadRequest)
 		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(fmt.Sprintf("http://%s/%s", r.Host, string(dst))))
+	w.Write([]byte(h.makeResultURL(r, dst)))
 }
 
 func (h *URLShortener) getURL(w http.ResponseWriter, r *http.Request) {
@@ -96,14 +101,14 @@ func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dst, err := h.makeShortURL(urlToShorten)
+	dst, err := h.generateShortID(urlToShorten)
 	if err != nil {
 		http.Error(w, "", http.StatusBadRequest)
 		return
 	}
 
 	response := make(map[string]string)
-	response["result"] = fmt.Sprintf("http://%s/%s", r.Host, string(dst))
+	response["result"] = h.makeResultURL(r, dst)
 
 	if dst, err = json.Marshal(response); err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
@@ -115,7 +120,7 @@ func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
 	w.Write(dst)
 }
 
-func (h *URLShortener) makeShortURL(data string) ([]byte, error) {
+func (h *URLShortener) generateShortID(data string) ([]byte, error) {
 	u, err := url.Parse(data)
 	if err != nil || len(u.Hostname()) == 0 {
 		return nil, errors.New("bad input data")
@@ -131,4 +136,11 @@ func (h *URLShortener) makeShortURL(data string) ([]byte, error) {
 	base64.RawURLEncoding.Encode(dst, keyData)
 
 	return dst, nil
+}
+
+func (h *URLShortener) makeResultURL(r *http.Request, data []byte) string {
+	if len(h.domain) != 0 {
+		return fmt.Sprintf("%s/%s", h.domain, string(data))
+	}
+	return fmt.Sprintf("http://%s/%s", r.Host, string(data))
 }
