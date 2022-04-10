@@ -19,7 +19,7 @@ func (gz *gzipBodyReader) Close() error {
 	return gz.gzipReader.Close()
 }
 
-func UnpackGzip(next http.Handler) http.Handler {
+func DecompressGzip(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Content-Encoding") == "gzip" {
 			gz, err := gzip.NewReader(r.Body)
@@ -49,18 +49,20 @@ func CompressGzip(next http.Handler) http.Handler {
 			return
 		}
 
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(r.Header.Get("Accept-Encoding")))
-		//gz, err := gzip.NewWriterLevel(w, gzip.BestCompression)
-		//if err != nil {
-		//	http.Error(w, "", http.StatusInternalServerError)
-		//	return
-		//}
-		//defer gz.Close()
-		//
-		//next.ServeHTTP(gzipBodyWriter{
-		//	ResponseWriter: w,
-		//	writer:         gz,
-		//}, r)
+		gz, err := gzip.NewWriterLevel(w, gzip.BestCompression)
+		if err != nil {
+			http.Error(w, "", http.StatusInternalServerError)
+			return
+		}
+		defer gz.Close()
+
+		next.ServeHTTP(gzipBodyWriter{
+			ResponseWriter: w,
+			writer:         gz,
+		}, r)
+
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
+		w.Header().Del("Content-Length")
 	})
 }

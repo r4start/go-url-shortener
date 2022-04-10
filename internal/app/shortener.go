@@ -1,11 +1,13 @@
 package app
 
 import (
+	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"io"
 	"net/http"
 	"net/url"
@@ -37,8 +39,9 @@ func NewURLShortener(domain, fileStoragePath string) (*URLShortener, error) {
 	}
 	handler := &URLShortener{Mux: chi.NewMux(), urlStorage: st, domain: domain}
 
-	handler.Use(UnpackGzip)
-	handler.Use(CompressGzip)
+	handler.Use(DecompressGzip)
+	//handler.Use(CompressGzip)
+	handler.Use(middleware.Compress(gzip.BestCompression))
 
 	handler.Get("/{id}", handler.getURL)
 	handler.Post("/", handler.shorten)
@@ -158,20 +161,3 @@ func (h *URLShortener) makeResultURL(r *http.Request, data []byte) string {
 	}
 	return fmt.Sprintf("http://%s/%s", r.Host, string(data))
 }
-
-//func readRequestBody(r *http.Request) ([]byte, error) {
-//	var reader io.Reader
-//
-//	if r.Header.Get("Content-Encoding") == "gzip" {
-//		gz, err := gzip.NewReader(r.Body)
-//		if err != nil {
-//			return nil, err
-//		}
-//		defer gz.Close()
-//		reader = gz
-//	} else {
-//		reader = r.Body
-//	}
-//
-//	return io.ReadAll(reader)
-//}
