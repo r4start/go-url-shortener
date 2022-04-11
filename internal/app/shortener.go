@@ -40,7 +40,6 @@ func NewURLShortener(domain, fileStoragePath string) (*URLShortener, error) {
 	handler := &URLShortener{Mux: chi.NewMux(), urlStorage: st, domain: domain}
 
 	handler.Use(DecompressGzip)
-	//handler.Use(CompressGzip)
 	handler.Use(middleware.Compress(gzip.BestCompression))
 
 	handler.Get("/{id}", handler.getURL)
