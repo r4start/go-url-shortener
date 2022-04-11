@@ -1,13 +1,11 @@
 package app
 
 import (
-	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"io"
 	"net/http"
 	"net/url"
@@ -40,7 +38,7 @@ func NewURLShortener(domain, fileStoragePath string) (*URLShortener, error) {
 	handler := &URLShortener{Mux: chi.NewMux(), urlStorage: st, domain: domain}
 
 	handler.Use(DecompressGzip)
-	handler.Use(middleware.Compress(gzip.BestCompression))
+	handler.Use(CompressGzip)
 
 	handler.Get("/{id}", handler.getURL)
 	handler.Post("/", handler.shorten)
