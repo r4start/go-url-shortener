@@ -1,7 +1,7 @@
 package app
 
 import (
-	"compress/gzip"
+// 	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
