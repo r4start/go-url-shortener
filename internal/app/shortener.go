@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+// 	"github.com/go-chi/chi/v5/middleware"
 	"io"
 	"net/http"
 	"net/url"
@@ -40,8 +40,8 @@ func NewURLShortener(domain, fileStoragePath string) (*URLShortener, error) {
 	handler := &URLShortener{Mux: chi.NewMux(), urlStorage: st, domain: domain}
 
 	handler.Use(DecompressGzip)
-	//handler.Use(CompressGzip)
-	handler.Use(middleware.Compress(gzip.BestCompression))
+	handler.Use(CompressGzip)
+// 	handler.Use(middleware.Compress(gzip.BestCompression))
 
 	handler.Get("/{id}", handler.getURL)
 	handler.Post("/", handler.shorten)
