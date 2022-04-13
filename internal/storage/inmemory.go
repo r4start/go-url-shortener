@@ -18,19 +18,21 @@ func NewInMemoryStorage() URLStorage {
 	}
 }
 
-func (s *syncMapStorage) Add(url string) (uint64, error) {
-	hasher := fnv.New64()
-	_, err := hasher.Write([]byte(url))
+func (s *syncMapStorage) Add(url string) (uint64, bool, error) {
+	key, err := generateKey(&url)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	key := hasher.Sum64()
 
 	s.lock.Lock()
 	defer s.lock.Unlock()
+	if _, ok := s.urls[key]; ok {
+		return key, ok, nil
+	}
+
 	s.urls[key] = url
 
-	return key, nil
+	return key, false, nil
 }
 
 func (s *syncMapStorage) Get(id uint64) (string, error) {
@@ -40,4 +42,17 @@ func (s *syncMapStorage) Get(id uint64) (string, error) {
 		return v, nil
 	}
 	return "", errors.New("not found")
+}
+
+func (s *syncMapStorage) Close() error {
+	return nil
+}
+
+func generateKey(url *string) (uint64, error) {
+	hasher := fnv.New64()
+	_, err := hasher.Write([]byte(*url))
+	if err != nil {
+		return 0, err
+	}
+	return hasher.Sum64(), nil
 }
