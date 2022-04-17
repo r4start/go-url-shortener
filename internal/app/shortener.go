@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -13,7 +14,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/r4start/go-url-shortener/internal/storage"
 	"io"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -71,6 +71,8 @@ func NewURLShortener(domain, fileStoragePath string) (*URLShortener, error) {
 	handler.Use(CompressGzip)
 
 	handler.Get("/{id}", handler.getURL)
+	handler.Get("/api/user/urls", handler.apiUserURLs)
+
 	handler.Post("/", handler.shorten)
 	handler.Post("/api/shorten", handler.apiShortener)
 
@@ -190,6 +192,47 @@ func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
 	w.Write(dst)
 }
 
+func (h *URLShortener) apiUserURLs(w http.ResponseWriter, r *http.Request) {
+	userId, generated, err := h.getUserId(r)
+	if err != nil {
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
+	if generated {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	userUrls, err := h.urlStorage.GetUserData(userId)
+	if err != nil {
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
+	type response struct {
+		ShortURL    string `json:"short_url"`
+		OriginalURL string `json:"original_url"`
+	}
+
+	result := make([]response, 0)
+	for _, u := range userUrls {
+		result = append(result, response{
+			ShortURL:    h.makeResultURL(r, encodeID(u.ShortURLID)),
+			OriginalURL: u.OriginalURL,
+		})
+	}
+
+	responseBody, err := json.Marshal(result)
+	if err != nil {
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(responseBody)
+}
+
 func (h *URLShortener) generateShortID(userId uint64, data string) ([]byte, error) {
 	u, err := url.Parse(data)
 	if err != nil || len(u.Hostname()) == 0 {
@@ -201,11 +244,11 @@ func (h *URLShortener) generateShortID(userId uint64, data string) ([]byte, erro
 		return nil, err
 	}
 
-	keyData := []byte(strconv.FormatUint(key, 16))
-	dst := make([]byte, base64.RawURLEncoding.EncodedLen(len(keyData)))
-	base64.RawURLEncoding.Encode(dst, keyData)
+	//keyData := []byte(strconv.FormatUint(key, 16))
+	//dst := make([]byte, base64.RawURLEncoding.EncodedLen(len(keyData)))
+	//base64.RawURLEncoding.Encode(dst, keyData)
 
-	return dst, nil
+	return encodeID(key), nil
 }
 
 func (h *URLShortener) makeResultURL(r *http.Request, data []byte) string {
@@ -219,7 +262,11 @@ func (h *URLShortener) getUserId(r *http.Request) (uint64, bool, error) {
 	userIdCookie, err := r.Cookie(UserIdCookieName)
 
 	if err == http.ErrNoCookie {
-		return rand.Uint64(), true, nil
+		id, err := cryptoRandUint64()
+		if err != nil {
+			return 0, false, err
+		}
+		return id, true, nil
 	} else if err != nil {
 		return 0, false, err
 	}
@@ -244,7 +291,11 @@ func (h *URLShortener) getUserId(r *http.Request) (uint64, bool, error) {
 	msgSign := hasher.Sum(nil)
 
 	if !hmac.Equal(sign, msgSign) {
-		return rand.Uint64(), true, nil
+		id, err := cryptoRandUint64()
+		if err != nil {
+			return 0, false, err
+		}
+		return id, true, nil
 	}
 
 	var rawId []byte
@@ -253,7 +304,7 @@ func (h *URLShortener) getUserId(r *http.Request) (uint64, bool, error) {
 		return 0, false, err
 	}
 
-	return binary.BigEndian.Uint64(uid), false, nil
+	return binary.BigEndian.Uint64(uid[:binary.MaxVarintLen64]), false, nil
 }
 
 func (h *URLShortener) setUserId(w http.ResponseWriter, userId uint64) error {
@@ -291,4 +342,23 @@ func (h *URLShortener) setUserId(w http.ResponseWriter, userId uint64) error {
 	http.SetCookie(w, &cookie)
 
 	return nil
+}
+
+func encodeID(id uint64) []byte {
+	keyData := []byte(strconv.FormatUint(id, 16))
+	dst := make([]byte, base64.RawURLEncoding.EncodedLen(len(keyData)))
+	base64.RawURLEncoding.Encode(dst, keyData)
+	return dst
+}
+
+func cryptoRandUint64() (uint64, error) {
+	randU64 := make([]byte, binary.MaxVarintLen64)
+	if readBytes, err := rand.Read(randU64); err != nil || readBytes != binary.MaxVarintLen64 {
+		if err != nil {
+			return 0, err
+		} else {
+			return 0, errors.New("not enough entropy")
+		}
+	}
+	return binary.BigEndian.Uint64(randU64), nil
 }

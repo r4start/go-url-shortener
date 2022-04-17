@@ -81,11 +81,11 @@ func (s *syncUserStorage) Add(userId uint64, url string) (uint64, bool, error) {
 	}
 
 	data = append(data, UserData{
-		ShortURLId:  key,
+		ShortURLID:  key,
 		OriginalURL: url,
 	})
 
-	//s.userData[userId] = data
+	s.userData[userId] = data
 
 	return key, false, nil
 }

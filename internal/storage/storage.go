@@ -7,7 +7,7 @@ type URLStorage interface {
 }
 
 type UserData struct {
-	ShortURLId  uint64
+	ShortURLID  uint64
 	OriginalURL string
 }
 
