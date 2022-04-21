@@ -19,11 +19,11 @@ import (
 	"strconv"
 )
 
-const UserIdCookieName = "gusid"
+const UserIDCookieName = "gusid"
 
 type URLShortener struct {
 	*chi.Mux
-	urlStorage storage.UserURLStorage
+	urlStorage storage.URLStorage
 	domain     string
 	gcm        cipher.AEAD
 	privateKey []byte
@@ -34,16 +34,17 @@ func DefaultURLShortener() (*URLShortener, error) {
 }
 
 func NewURLShortener(domain, fileStoragePath string) (*URLShortener, error) {
-	//var st storage.URLStorage
-	//if len(fileStoragePath) != 0 {
-	//	var err error
-	//	st, err = storage.NewFileStorage(fileStoragePath)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//} else {
-	//	st = storage.NewInMemoryStorage()
-	//}
+	var st storage.URLStorage
+	if len(fileStoragePath) != 0 {
+		var err error
+		st, err = storage.NewFileStorage(fileStoragePath)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		st = storage.NewInMemoryStorage()
+	}
+
 	privateKey := make([]byte, 32)
 	readBytes, err := rand.Read(privateKey)
 	if err != nil || readBytes != len(privateKey) {
@@ -61,7 +62,7 @@ func NewURLShortener(domain, fileStoragePath string) (*URLShortener, error) {
 
 	handler := &URLShortener{
 		Mux:        chi.NewMux(),
-		urlStorage: storage.NewInMemoryUserStorage(),
+		urlStorage: st,
 		domain:     domain,
 		gcm:        aead,
 		privateKey: privateKey,
@@ -84,7 +85,7 @@ func NewURLShortener(domain, fileStoragePath string) (*URLShortener, error) {
 }
 
 func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
-	userId, generated, err := h.getUserId(r)
+	userID, generated, err := h.getUserID(r)
 	if err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
@@ -96,14 +97,14 @@ func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dst, err := h.generateShortID(userId, string(b))
+	dst, err := h.generateShortID(userID, string(b))
 	if err != nil {
 		http.Error(w, "", http.StatusBadRequest)
 		return
 	}
 
 	if generated {
-		if err := h.setUserId(w, userId); err != nil {
+		if err := h.setUserID(w, userID); err != nil {
 			http.Error(w, "", http.StatusInternalServerError)
 			return
 		}
@@ -142,7 +143,7 @@ func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userId, generated, err := h.getUserId(r)
+	userID, generated, err := h.getUserID(r)
 	if err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
@@ -166,7 +167,7 @@ func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dst, err := h.generateShortID(userId, urlToShorten)
+	dst, err := h.generateShortID(userID, urlToShorten)
 	if err != nil {
 		http.Error(w, "", http.StatusBadRequest)
 		return
@@ -181,7 +182,7 @@ func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if generated {
-		if err := h.setUserId(w, userId); err != nil {
+		if err := h.setUserID(w, userID); err != nil {
 			http.Error(w, "", http.StatusInternalServerError)
 			return
 		}
@@ -193,7 +194,7 @@ func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *URLShortener) apiUserURLs(w http.ResponseWriter, r *http.Request) {
-	userId, generated, err := h.getUserId(r)
+	userID, generated, err := h.getUserID(r)
 	if err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
@@ -204,7 +205,7 @@ func (h *URLShortener) apiUserURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userUrls, err := h.urlStorage.GetUserData(userId)
+	userUrls, err := h.urlStorage.GetUserData(userID)
 	if err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
@@ -233,13 +234,13 @@ func (h *URLShortener) apiUserURLs(w http.ResponseWriter, r *http.Request) {
 	w.Write(responseBody)
 }
 
-func (h *URLShortener) generateShortID(userId uint64, data string) ([]byte, error) {
+func (h *URLShortener) generateShortID(userID uint64, data string) ([]byte, error) {
 	u, err := url.Parse(data)
 	if err != nil || len(u.Hostname()) == 0 {
 		return nil, errors.New("bad input data")
 	}
 
-	key, _, err := h.urlStorage.Add(userId, u.String())
+	key, _, err := h.urlStorage.Add(userID, u.String())
 	if err != nil {
 		return nil, err
 	}
@@ -258,8 +259,8 @@ func (h *URLShortener) makeResultURL(r *http.Request, data []byte) string {
 	return fmt.Sprintf("http://%s/%s", r.Host, string(data))
 }
 
-func (h *URLShortener) getUserId(r *http.Request) (uint64, bool, error) {
-	userIdCookie, err := r.Cookie(UserIdCookieName)
+func (h *URLShortener) getUserID(r *http.Request) (uint64, bool, error) {
+	userIDCookie, err := r.Cookie(UserIDCookieName)
 
 	if err == http.ErrNoCookie {
 		id, err := cryptoRandUint64()
@@ -272,7 +273,7 @@ func (h *URLShortener) getUserId(r *http.Request) (uint64, bool, error) {
 	}
 
 	encoder := base64.URLEncoding.WithPadding(base64.NoPadding)
-	data, err := encoder.DecodeString(userIdCookie.Value)
+	data, err := encoder.DecodeString(userIDCookie.Value)
 	if err != nil {
 		return 0, false, err
 	}
@@ -298,8 +299,8 @@ func (h *URLShortener) getUserId(r *http.Request) (uint64, bool, error) {
 		return id, true, nil
 	}
 
-	var rawId []byte
-	uid, err := h.gcm.Open(rawId, nonce, text, nil)
+	var rawID []byte
+	uid, err := h.gcm.Open(rawID, nonce, text, nil)
 	if err != nil {
 		return 0, false, err
 	}
@@ -307,7 +308,7 @@ func (h *URLShortener) getUserId(r *http.Request) (uint64, bool, error) {
 	return binary.BigEndian.Uint64(uid[:binary.MaxVarintLen64]), false, nil
 }
 
-func (h *URLShortener) setUserId(w http.ResponseWriter, userId uint64) error {
+func (h *URLShortener) setUserID(w http.ResponseWriter, userID uint64) error {
 	nonce := make([]byte, h.gcm.NonceSize())
 
 	readBytes, err := rand.Read(nonce)
@@ -320,7 +321,7 @@ func (h *URLShortener) setUserId(w http.ResponseWriter, userId uint64) error {
 	}
 
 	text := make([]byte, binary.MaxVarintLen64)
-	binary.BigEndian.PutUint64(text, userId)
+	binary.BigEndian.PutUint64(text, userID)
 
 	var dst []byte
 	cipherText := h.gcm.Seal(dst, nonce, text, nil)
@@ -335,7 +336,7 @@ func (h *URLShortener) setUserId(w http.ResponseWriter, userId uint64) error {
 	encodedText := encoder.EncodeToString(cipherText)
 
 	cookie := http.Cookie{
-		Name:  UserIdCookieName,
+		Name:  UserIDCookieName,
 		Value: encodedText,
 		Path:  "/",
 	}
