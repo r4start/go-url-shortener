@@ -1,11 +1,13 @@
 package app
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -17,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 const UserIDCookieName = "gusid"
@@ -27,13 +30,14 @@ type URLShortener struct {
 	domain     string
 	gcm        cipher.AEAD
 	privateKey []byte
+	db         *sql.DB
 }
 
 func DefaultURLShortener() (*URLShortener, error) {
-	return NewURLShortener("", "")
+	return NewURLShortener(nil, "", "")
 }
 
-func NewURLShortener(domain, fileStoragePath string) (*URLShortener, error) {
+func NewURLShortener(db *sql.DB, domain, fileStoragePath string) (*URLShortener, error) {
 	var st storage.URLStorage
 	if len(fileStoragePath) != 0 {
 		var err error
@@ -66,12 +70,14 @@ func NewURLShortener(domain, fileStoragePath string) (*URLShortener, error) {
 		domain:     domain,
 		gcm:        aead,
 		privateKey: privateKey,
+		db:         db,
 	}
 
 	handler.Use(DecompressGzip)
 	handler.Use(CompressGzip)
 
 	handler.Get("/{id}", handler.getURL)
+	handler.Get("/ping", handler.ping)
 	handler.Get("/api/user/urls", handler.apiUserURLs)
 
 	handler.Post("/", handler.shorten)
@@ -232,6 +238,22 @@ func (h *URLShortener) apiUserURLs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(responseBody)
+}
+
+func (h *URLShortener) ping(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+	defer cancel()
+	if err := h.db.PingContext(ctx); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *URLShortener) generateShortID(userID uint64, data string) ([]byte, error) {

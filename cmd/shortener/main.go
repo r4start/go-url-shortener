@@ -1,16 +1,20 @@
 package main
 
 import (
+	"database/sql"
 	"flag"
 	"github.com/r4start/go-url-shortener/internal/app"
 	"net/http"
 	"os"
+
+	_ "github.com/jackc/pgx/v4/stdlib"
 )
 
 type config struct {
-	ServerAddress   string `env:"SERVER_ADDRESS" envDefault:":8080"`
-	BaseURL         string `env:"BASE_URL"`
-	FileStoragePath string `env:"FILE_STORAGE_PATH"`
+	ServerAddress            string `env:"SERVER_ADDRESS" envDefault:":8080"`
+	BaseURL                  string `env:"BASE_URL"`
+	FileStoragePath          string `env:"FILE_STORAGE_PATH"`
+	DatabaseConnectionString string `env:"DATABASE_DSN"`
 }
 
 func main() {
@@ -19,6 +23,7 @@ func main() {
 	flag.StringVar(&cfg.ServerAddress, "a", os.Getenv("SERVER_ADDRESS"), "")
 	flag.StringVar(&cfg.BaseURL, "b", os.Getenv("BASE_URL"), "")
 	flag.StringVar(&cfg.FileStoragePath, "f", os.Getenv("FILE_STORAGE_PATH"), "")
+	flag.StringVar(&cfg.DatabaseConnectionString, "d", os.Getenv("DATABASE_DSN"), "")
 
 	flag.Parse()
 
@@ -26,7 +31,18 @@ func main() {
 		cfg.ServerAddress = ":8080"
 	}
 
-	handler, err := app.NewURLShortener(cfg.BaseURL, cfg.FileStoragePath)
+	var dbConn *sql.DB = nil
+	var err error = nil
+
+	if len(cfg.DatabaseConnectionString) != 0 {
+		dbConn, err = sql.Open("pgx", cfg.DatabaseConnectionString)
+		if err != nil {
+			panic(err)
+		}
+		defer dbConn.Close()
+	}
+
+	handler, err := app.NewURLShortener(dbConn, cfg.BaseURL, cfg.FileStoragePath)
 	if err != nil {
 		panic(err)
 	}
