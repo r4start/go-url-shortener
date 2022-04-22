@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,6 +40,7 @@ func NewFileStorage(filePath string) (URLStorage, error) {
 		return storage, nil
 	}
 
+	ctx := context.Background()
 	decoder := json.NewDecoder(file)
 	for {
 		data := make(map[string]string)
@@ -52,7 +54,7 @@ func NewFileStorage(filePath string) (URLStorage, error) {
 			if err != nil {
 				return nil, err
 			}
-			if _, _, err := storage.memoryStorage.Add(userID, v); err != nil {
+			if _, _, err := storage.memoryStorage.Add(ctx, userID, v); err != nil {
 				return nil, err
 			}
 		}
@@ -61,8 +63,8 @@ func NewFileStorage(filePath string) (URLStorage, error) {
 	return storage, nil
 }
 
-func (s *fileStorage) Add(userID uint64, url string) (uint64, bool, error) {
-	key, exists, err := s.memoryStorage.Add(userID, url)
+func (s *fileStorage) Add(ctx context.Context, userID uint64, url string) (uint64, bool, error) {
+	key, exists, err := s.memoryStorage.Add(ctx, userID, url)
 	if err != nil {
 		return 0, exists, err
 	}
@@ -84,12 +86,12 @@ func (s *fileStorage) Add(userID uint64, url string) (uint64, bool, error) {
 	return key, exists, err
 }
 
-func (s *fileStorage) Get(id uint64) (string, error) {
-	return s.memoryStorage.Get(id)
+func (s *fileStorage) Get(ctx context.Context, id uint64) (string, error) {
+	return s.memoryStorage.Get(ctx, id)
 }
 
-func (s *fileStorage) GetUserData(userID uint64) ([]UserData, error) {
-	return s.memoryStorage.GetUserData(userID)
+func (s *fileStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData, error) {
+	return s.memoryStorage.GetUserData(ctx, userID)
 }
 
 func (s *fileStorage) Close() error {

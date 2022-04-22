@@ -22,7 +22,11 @@ import (
 	"time"
 )
 
-const UserIDCookieName = "gusid"
+const (
+	UserIDCookieName = "gusid"
+
+	StorageOperationTimeout = time.Second
+)
 
 type URLShortener struct {
 	*chi.Mux
@@ -33,22 +37,7 @@ type URLShortener struct {
 	db         *sql.DB
 }
 
-func DefaultURLShortener() (*URLShortener, error) {
-	return NewURLShortener(nil, "", "")
-}
-
-func NewURLShortener(db *sql.DB, domain, fileStoragePath string) (*URLShortener, error) {
-	var st storage.URLStorage
-	if len(fileStoragePath) != 0 {
-		var err error
-		st, err = storage.NewFileStorage(fileStoragePath)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		st = storage.NewInMemoryStorage()
-	}
-
+func NewURLShortener(db *sql.DB, domain string, st storage.URLStorage) (*URLShortener, error) {
 	privateKey := make([]byte, 32)
 	readBytes, err := rand.Read(privateKey)
 	if err != nil || readBytes != len(privateKey) {
@@ -103,7 +92,10 @@ func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dst, err := h.generateShortID(userID, string(b))
+	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
+	defer cancel()
+
+	dst, err := h.generateShortID(ctx, userID, string(b))
 	if err != nil {
 		http.Error(w, "", http.StatusBadRequest)
 		return
@@ -133,7 +125,10 @@ func (h *URLShortener) getURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, err := h.urlStorage.Get(key)
+	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
+	defer cancel()
+
+	u, err := h.urlStorage.Get(ctx, key)
 	if err != nil {
 		http.Error(w, "", http.StatusNotFound)
 		return
@@ -173,7 +168,10 @@ func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dst, err := h.generateShortID(userID, urlToShorten)
+	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
+	defer cancel()
+
+	dst, err := h.generateShortID(ctx, userID, urlToShorten)
 	if err != nil {
 		http.Error(w, "", http.StatusBadRequest)
 		return
@@ -211,7 +209,9 @@ func (h *URLShortener) apiUserURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userUrls, err := h.urlStorage.GetUserData(userID)
+	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
+	defer cancel()
+	userUrls, err := h.urlStorage.GetUserData(ctx, userID)
 	if err != nil {
 		http.Error(w, "", http.StatusInternalServerError)
 		return
@@ -246,7 +246,7 @@ func (h *URLShortener) ping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
 	defer cancel()
 	if err := h.db.PingContext(ctx); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -256,20 +256,16 @@ func (h *URLShortener) ping(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h *URLShortener) generateShortID(userID uint64, data string) ([]byte, error) {
+func (h *URLShortener) generateShortID(ctx context.Context, userID uint64, data string) ([]byte, error) {
 	u, err := url.Parse(data)
 	if err != nil || len(u.Hostname()) == 0 {
 		return nil, errors.New("bad input data")
 	}
 
-	key, _, err := h.urlStorage.Add(userID, u.String())
+	key, _, err := h.urlStorage.Add(ctx, userID, u.String())
 	if err != nil {
 		return nil, err
 	}
-
-	//keyData := []byte(strconv.FormatUint(key, 16))
-	//dst := make([]byte, base64.RawURLEncoding.EncodedLen(len(keyData)))
-	//base64.RawURLEncoding.Encode(dst, keyData)
 
 	return encodeID(key), nil
 }

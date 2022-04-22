@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"flag"
 	"github.com/r4start/go-url-shortener/internal/app"
+	"github.com/r4start/go-url-shortener/internal/storage"
 	"net/http"
 	"os"
 
@@ -31,18 +32,28 @@ func main() {
 		cfg.ServerAddress = ":8080"
 	}
 
+	var st storage.URLStorage = nil
 	var dbConn *sql.DB = nil
 	var err error = nil
 
 	if len(cfg.DatabaseConnectionString) != 0 {
 		dbConn, err = sql.Open("pgx", cfg.DatabaseConnectionString)
-		if err != nil {
-			panic(err)
+		if err == nil {
+			st, err = storage.NewDatabaseStorage(dbConn)
 		}
-		defer dbConn.Close()
+	} else if len(cfg.FileStoragePath) != 0 {
+		st, err = storage.NewFileStorage(cfg.FileStoragePath)
+	} else {
+		st = storage.NewInMemoryStorage()
 	}
 
-	handler, err := app.NewURLShortener(dbConn, cfg.BaseURL, cfg.FileStoragePath)
+	if err != nil {
+		panic(err)
+	}
+
+	defer st.Close()
+
+	handler, err := app.NewURLShortener(dbConn, cfg.BaseURL, st)
 	if err != nil {
 		panic(err)
 	}

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/r4start/go-url-shortener/internal/storage"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +31,7 @@ func TestURLShortener_ServeHTTP(t *testing.T) {
 		},
 	}
 
-	h, err := DefaultURLShortener()
+	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage())
 	assert.Nil(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -62,7 +63,7 @@ func TestURLShortener_getURL(t *testing.T) {
 		},
 	}
 
-	h, err := DefaultURLShortener()
+	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage())
 	assert.Nil(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -164,7 +165,7 @@ func TestURLShortener_shorten(t *testing.T) {
 		},
 	}
 
-	h, err := DefaultURLShortener()
+	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage())
 	assert.Nil(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -256,7 +257,7 @@ func TestURLShortener_apiShortener(t *testing.T) {
 		},
 	}
 
-	h, err := DefaultURLShortener()
+	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage())
 	assert.Nil(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -1,8 +1,8 @@
 package storage
 
 import (
+	"context"
 	"errors"
-	"hash/fnv"
 	"sync"
 )
 
@@ -20,7 +20,7 @@ func NewInMemoryStorage() URLStorage {
 	}
 }
 
-func (s *syncMapStorage) Add(userID uint64, url string) (uint64, bool, error) {
+func (s *syncMapStorage) Add(ctx context.Context, userID uint64, url string) (uint64, bool, error) {
 	key, err := generateKey(&url)
 	if err != nil {
 		return 0, false, err
@@ -48,7 +48,7 @@ func (s *syncMapStorage) Add(userID uint64, url string) (uint64, bool, error) {
 	return key, false, nil
 }
 
-func (s *syncMapStorage) Get(id uint64) (string, error) {
+func (s *syncMapStorage) Get(ctx context.Context, id uint64) (string, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	if v, ok := s.urls[id]; ok {
@@ -57,7 +57,7 @@ func (s *syncMapStorage) Get(id uint64) (string, error) {
 	return "", errors.New("not found")
 }
 
-func (s *syncMapStorage) GetUserData(userID uint64) ([]UserData, error) {
+func (s *syncMapStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	if v, ok := s.userData[userID]; ok {
@@ -68,13 +68,4 @@ func (s *syncMapStorage) GetUserData(userID uint64) ([]UserData, error) {
 
 func (s *syncMapStorage) Close() error {
 	return nil
-}
-
-func generateKey(url *string) (uint64, error) {
-	hasher := fnv.New64()
-	_, err := hasher.Write([]byte(*url))
-	if err != nil {
-		return 0, err
-	}
-	return hasher.Sum64(), nil
 }
