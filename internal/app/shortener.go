@@ -228,7 +228,7 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 
 	requestData := make([]request, 0)
 	if err = json.Unmarshal(b, &requestData); err != nil {
-		http.Error(w, "", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -242,7 +242,7 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 
 	encodedIds, err := h.generateShortIDs(ctx, userID, urls)
 	if err != nil {
-		http.Error(w, "", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -268,7 +268,7 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusCreated)
 	w.Write(responseBody)
 }
 

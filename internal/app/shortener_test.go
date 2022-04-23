@@ -316,7 +316,7 @@ func TestURLShortener_apiBatchShortener(t *testing.T) {
 				},
 			},
 			expected: expected{
-				expectedCode: http.StatusOK,
+				expectedCode: http.StatusCreated,
 				expectedResponse: `[{"correlation_id":"0","short_url":"http://example.com/ZDIyNDk4MzQzMGZmMDQ1ZQ"},` +
 					`{"correlation_id":"1","short_url":"http://example.com/NWI4NTMwNmZjNWJmMjMzYg"},` +
 					`{"correlation_id":"2","short_url":"http://example.com/NGViNTExNTZlMzI2NmNiMw"},` +
