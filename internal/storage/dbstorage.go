@@ -67,6 +67,50 @@ func (s *dbStorage) Add(ctx context.Context, userID uint64, url string) (uint64,
 	return key, true, nil
 }
 
+func (s *dbStorage) AddURLs(ctx context.Context, userID uint64, urls []string) ([]AddResult, error) {
+	keys := make([]uint64, 0)
+	for _, url := range urls {
+		key, err := generateKey(&url)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+
+	tx, err := s.dbConn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, "insert into feeds (url_hash, url, user_id) values (?, '?', ?);")
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	result := make([]AddResult, 0)
+	for i, key := range keys {
+		if stmtResult, err := stmt.ExecContext(ctx, key, urls[i], userID); err != nil {
+			return nil, err
+		} else if count, err := stmtResult.RowsAffected(); err != nil {
+			return nil, err
+		} else {
+			result = append(result, AddResult{
+				ID:       key,
+				Inserted: count > 0,
+			})
+		}
+
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 func (s *dbStorage) Get(ctx context.Context, id uint64) (string, error) {
 	var url string
 

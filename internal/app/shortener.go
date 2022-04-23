@@ -232,19 +232,24 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	urls := make([]string, 0)
+	for _, e := range requestData {
+		urls = append(urls, e.OriginalURL)
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
 	defer cancel()
 
-	responseData := make([]response, 0)
-	for _, el := range requestData {
-		dst, err := h.generateShortID(ctx, userID, el.OriginalURL)
-		if err != nil {
-			http.Error(w, "", http.StatusBadRequest)
-			return
-		}
+	encodedIds, err := h.generateShortIDs(ctx, userID, urls)
+	if err != nil {
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
 
+	responseData := make([]response, 0)
+	for i, dst := range encodedIds {
 		responseData = append(responseData, response{
-			CorrelationID: el.CorrelationID,
+			CorrelationID: requestData[i].CorrelationID,
 			ShortURL:      h.makeResultURL(r, dst),
 		})
 	}
@@ -338,6 +343,27 @@ func (h *URLShortener) generateShortID(ctx context.Context, userID uint64, data 
 	}
 
 	return encodeID(key), nil
+}
+
+func (h *URLShortener) generateShortIDs(ctx context.Context, userID uint64, urls []string) ([][]byte, error) {
+	for _, data := range urls {
+		u, err := url.Parse(data)
+		if err != nil || len(u.Hostname()) == 0 {
+			return nil, errors.New("bad input data")
+		}
+	}
+
+	results, err := h.urlStorage.AddURLs(ctx, userID, urls)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([][]byte, 0)
+	for _, key := range results {
+		ids = append(ids, encodeID(key.ID))
+	}
+
+	return ids, nil
 }
 
 func (h *URLShortener) makeResultURL(r *http.Request, data []byte) string {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -81,9 +82,7 @@ func (s *fileStorage) Add(ctx context.Context, userID uint64, url string) (uint6
 		return key, exists, err
 	}
 
-	s.writer.Flush()
-
-	return key, exists, err
+	return key, exists, s.writer.Flush()
 }
 
 func (s *fileStorage) Get(ctx context.Context, id uint64) (string, error) {
@@ -92,6 +91,33 @@ func (s *fileStorage) Get(ctx context.Context, id uint64) (string, error) {
 
 func (s *fileStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData, error) {
 	return s.memoryStorage.GetUserData(ctx, userID)
+}
+
+func (s *fileStorage) AddURLs(ctx context.Context, userID uint64, urls []string) ([]AddResult, error) {
+	result, err := s.memoryStorage.AddURLs(ctx, userID, urls)
+	if err != nil {
+		return nil, err
+	}
+
+	dataToAdd := make([]string, 0)
+	for i, key := range result {
+		if !key.Inserted {
+			continue
+		}
+
+		dataToAdd = append(dataToAdd, fmt.Sprintf("{\"%d\":\"%s\"}\n", userID, urls[i]))
+	}
+
+	insertText := strings.Join(dataToAdd, "")
+
+	s.fileLock.Lock()
+	defer s.fileLock.Unlock()
+
+	if _, err := s.writer.WriteString(insertText); err != nil {
+		return nil, err
+	}
+
+	return result, s.writer.Flush()
 }
 
 func (s *fileStorage) Close() error {
