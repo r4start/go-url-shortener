@@ -83,7 +83,7 @@ func (s *dbStorage) AddURLs(ctx context.Context, userID uint64, urls []string) (
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, "insert into feeds (url_hash, url, user_id) values (?, '?', ?);")
+	stmt, err := tx.PrepareContext(ctx, "INSERT INTO feeds (url_hash, url, user_id) VALUES ($1, $2, $3)")
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (s *dbStorage) AddURLs(ctx context.Context, userID uint64, urls []string) (
 
 	result := make([]AddResult, 0)
 	for i, key := range keys {
-		if stmtResult, err := stmt.ExecContext(ctx, key, urls[i], userID); err != nil {
+		if stmtResult, err := stmt.ExecContext(ctx, int64(key), urls[i], int64(userID)); err != nil {
 			return nil, err
 		} else if count, err := stmtResult.RowsAffected(); err != nil {
 			return nil, err

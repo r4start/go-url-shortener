@@ -25,7 +25,7 @@ import (
 const (
 	UserIDCookieName = "gusid"
 
-	StorageOperationTimeout = time.Second
+	StorageOperationTimeout = 10000 * time.Second
 )
 
 type URLShortener struct {
@@ -228,7 +228,7 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 
 	requestData := make([]request, 0)
 	if err = json.Unmarshal(b, &requestData); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "", http.StatusBadRequest)
 		return
 	}
 
@@ -242,7 +242,7 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 
 	encodedIds, err := h.generateShortIDs(ctx, userID, urls)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "", http.StatusBadRequest)
 		return
 	}
 
