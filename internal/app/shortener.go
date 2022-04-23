@@ -71,6 +71,7 @@ func NewURLShortener(db *sql.DB, domain string, st storage.URLStorage) (*URLShor
 
 	handler.Post("/", handler.shorten)
 	handler.Post("/api/shorten", handler.apiShortener)
+	handler.Post("/api/shorten/batch", handler.apiBatchShortener)
 
 	handler.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusBadRequest)
@@ -195,6 +196,75 @@ func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	w.Write(dst)
+}
+
+func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request) {
+	type request struct {
+		CorrelationID string `json:"correlation_id"`
+		OriginalURL   string `json:"original_url"`
+	}
+
+	type response struct {
+		CorrelationID string `json:"correlation_id"`
+		ShortURL      string `json:"short_url"`
+	}
+
+	if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+
+	userID, generated, err := h.getUserID(r)
+	if err != nil {
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
+	b, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
+	requestData := make([]request, 0)
+	if err = json.Unmarshal(b, &requestData); err != nil {
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
+	defer cancel()
+
+	responseData := make([]response, 0)
+	for _, el := range requestData {
+		dst, err := h.generateShortID(ctx, userID, el.OriginalURL)
+		if err != nil {
+			http.Error(w, "", http.StatusBadRequest)
+			return
+		}
+
+		responseData = append(responseData, response{
+			CorrelationID: el.CorrelationID,
+			ShortURL:      h.makeResultURL(r, dst),
+		})
+	}
+
+	if generated {
+		if err := h.setUserID(w, userID); err != nil {
+			http.Error(w, "", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	responseBody, err := json.Marshal(&responseData)
+	if err != nil {
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(responseBody)
 }
 
 func (h *URLShortener) apiUserURLs(w http.ResponseWriter, r *http.Request) {

@@ -1,10 +1,13 @@
 package app
 
 import (
+	"bytes"
+	"encoding/json"
 	"github.com/r4start/go-url-shortener/internal/storage"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -275,6 +278,118 @@ func TestURLShortener_apiShortener(t *testing.T) {
 			if result.StatusCode == http.StatusCreated {
 				assert.Equal(t, tt.expectedResponse, string(resBody))
 			}
+		})
+	}
+}
+
+func TestURLShortener_apiBatchShortener(t *testing.T) {
+	type request struct {
+		CorrelationID string `json:"correlation_id"`
+		OriginalURL   string `json:"original_url"`
+	}
+
+	type args struct {
+		URLs []string
+	}
+	type expected struct {
+		expectedCode     int
+		expectedResponse string
+	}
+	tests := []struct {
+		name string
+		args args
+		expected
+	}{
+		{
+			name: "Shortener check #1",
+			args: args{
+				URLs: []string{
+					"http://ya.ru",
+					"http://vc.ru",
+					"http://habr.ru",
+					"http://lenta.ru",
+					"http://vk.ru",
+					"http://ok.ru",
+					"http://vz.ru",
+					"http://ria.ru",
+					"http://goog.le",
+				},
+			},
+			expected: expected{
+				expectedCode: http.StatusOK,
+				expectedResponse: `[{"correlation_id":"0","short_url":"http://example.com/ZDIyNDk4MzQzMGZmMDQ1ZQ"},` +
+					`{"correlation_id":"1","short_url":"http://example.com/NWI4NTMwNmZjNWJmMjMzYg"},` +
+					`{"correlation_id":"2","short_url":"http://example.com/NGViNTExNTZlMzI2NmNiMw"},` +
+					`{"correlation_id":"3","short_url":"http://example.com/ZTdjMTdjZDVlMTY3YjQ1YQ"},` +
+					`{"correlation_id":"4","short_url":"http://example.com/YTE3MzY4NmZlZDg4NmE2Mw"},` +
+					`{"correlation_id":"5","short_url":"http://example.com/MWE5MGMyYWI3OTVmNDRjZQ"},` +
+					`{"correlation_id":"6","short_url":"http://example.com/MWZlNTFiNmZhNDQyOWNiOA"},` +
+					`{"correlation_id":"7","short_url":"http://example.com/N2NlNjg3NzEyMzQzZGNlZQ"},` +
+					`{"correlation_id":"8","short_url":"http://example.com/N2YwNTlmY2E2NGNlZWJjZQ"}]`,
+			},
+		},
+		//{
+		//	name: "Shortener check #3",
+		//	args: args{
+		//		w: httptest.NewRecorder(),
+		//		r: httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader("vc.ru")),
+		//	},
+		//	expected: expected{
+		//		expectedCode:     http.StatusBadRequest,
+		//		expectedResponse: "",
+		//	},
+		//},
+		//{
+		//	name: "Shortener check #4",
+		//	args: args{
+		//		w: httptest.NewRecorder(),
+		//		r: httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader("kajsdhkashd")),
+		//	},
+		//	expected: expected{
+		//		expectedCode:     http.StatusBadRequest,
+		//		expectedResponse: "",
+		//	},
+		//},
+		//{
+		//	name: "Shortener check #5",
+		//	args: args{
+		//		w: httptest.NewRecorder(),
+		//		r: httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader("")),
+		//	},
+		//	expected: expected{
+		//		expectedCode:     http.StatusBadRequest,
+		//		expectedResponse: "",
+		//	},
+		//},
+	}
+
+	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage())
+	assert.Nil(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requests := make([]request, 0)
+			for i, u := range tt.args.URLs {
+				requests = append(requests, request{
+					CorrelationID: strconv.FormatUint(uint64(i), 10),
+					OriginalURL:   u,
+				})
+			}
+
+			body, err := json.Marshal(requests)
+			assert.Nil(t, err)
+
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader(body))
+			r.Header.Set("content-type", "application/json")
+			h.ServeHTTP(w, r)
+			result := w.Result()
+
+			defer result.Body.Close()
+			resBody, err := io.ReadAll(result.Body)
+			assert.Nil(t, err)
+
+			assert.Equal(t, tt.expectedCode, result.StatusCode)
+			assert.Equal(t, tt.expectedResponse, string(resBody))
 		})
 	}
 }
