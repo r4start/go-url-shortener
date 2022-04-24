@@ -26,8 +26,15 @@ import (
 const (
 	UserIDCookieName = "gusid"
 
-	StorageOperationTimeout = 10000 * time.Second
+	StorageOperationTimeout = time.Second
 )
+
+var ErrBadRequest = errors.New("bad request")
+
+type apiRequestData struct {
+	UserID        uint64
+	IsIDGenerated bool
+}
 
 type URLShortener struct {
 	*chi.Mux
@@ -158,30 +165,14 @@ func (h *URLShortener) getURL(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
-	if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
-		h.logger.Error("bad content type", zap.String("content_type", contentType))
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-
-	userID, generated, err := h.getUserID(r)
-	if err != nil {
-		h.logger.Error("failed to generate user id", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
-	b, err := io.ReadAll(r.Body)
-	if err != nil {
-		h.logger.Error("failed to read request body", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
 	var request map[string]string
-	if err = json.Unmarshal(b, &request); err != nil {
-		h.logger.Error("failed to unmarshal request json", zap.Error(err))
+
+	reqData, err := h.apiParseRequest(r, &request)
+	if errors.Is(err, ErrBadRequest) {
 		http.Error(w, "", http.StatusBadRequest)
+		return
+	} else if err != nil {
+		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
 
@@ -195,7 +186,7 @@ func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
 	defer cancel()
 
-	dst, exists, err := h.generateShortID(ctx, userID, urlToShorten)
+	dst, exists, err := h.generateShortID(ctx, reqData.UserID, urlToShorten)
 	if err != nil {
 		h.logger.Error("failed to generate short id", zap.Error(err))
 		http.Error(w, "", http.StatusBadRequest)
@@ -205,30 +196,11 @@ func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
 	response := make(map[string]string)
 	response["result"] = h.makeResultURL(r, dst)
 
-	if dst, err = json.Marshal(response); err != nil {
-		h.logger.Error("failed to marshal response", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
+	statusCode := http.StatusCreated
+	if exists {
+		statusCode = http.StatusConflict
 	}
-
-	if generated {
-		if err := h.setUserID(w, userID); err != nil {
-			h.logger.Error("failed to set user id", zap.Error(err))
-			http.Error(w, "", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if !exists {
-		w.WriteHeader(http.StatusCreated)
-	} else {
-		w.WriteHeader(http.StatusConflict)
-	}
-
-	if _, err := w.Write(dst); err != nil {
-		h.logger.Error("failed to write response body", zap.Error(err))
-	}
+	h.apiWriteResponse(w, reqData, statusCode, response)
 }
 
 func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request) {
@@ -242,30 +214,13 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 		ShortURL      string `json:"short_url"`
 	}
 
-	if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
-		h.logger.Error("bad content type", zap.String("content_type", contentType))
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-
-	userID, generated, err := h.getUserID(r)
-	if err != nil {
-		h.logger.Error("failed to generate user id", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
-	b, err := io.ReadAll(r.Body)
-	if err != nil {
-		h.logger.Error("failed to read request body", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
 	requestData := make([]request, 0)
-	if err = json.Unmarshal(b, &requestData); err != nil {
-		h.logger.Error("failed to unmarshal request json", zap.Error(err))
+	reqData, err := h.apiParseRequest(r, &requestData)
+	if errors.Is(err, ErrBadRequest) {
 		http.Error(w, "", http.StatusBadRequest)
+		return
+	} else if err != nil {
+		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
 
@@ -277,7 +232,7 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
 	defer cancel()
 
-	encodedIds, err := h.generateShortIDs(ctx, userID, urls)
+	encodedIds, err := h.generateShortIDs(ctx, reqData.UserID, urls)
 	if err != nil {
 		h.logger.Error("failed to generate short ids", zap.Error(err))
 		http.Error(w, "", http.StatusBadRequest)
@@ -292,27 +247,7 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 		})
 	}
 
-	if generated {
-		if err := h.setUserID(w, userID); err != nil {
-			h.logger.Error("failed to set user id", zap.Error(err))
-			http.Error(w, "", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	responseBody, err := json.Marshal(&responseData)
-	if err != nil {
-		h.logger.Error("failed to marshal response", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-
-	if _, err := w.Write(responseBody); err != nil {
-		h.logger.Error("failed to write response body", zap.Error(err))
-	}
+	h.apiWriteResponse(w, reqData, http.StatusCreated, responseData)
 }
 
 func (h *URLShortener) apiUserURLs(w http.ResponseWriter, r *http.Request) {
@@ -350,18 +285,9 @@ func (h *URLShortener) apiUserURLs(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	responseBody, err := json.Marshal(result)
-	if err != nil {
-		h.logger.Error("failed to marshal response", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	if _, err := w.Write(responseBody); err != nil {
-		h.logger.Error("failed to write response body", zap.Error(err))
-	}
+	h.apiWriteResponse(w, &apiRequestData{
+		UserID: userID,
+	}, http.StatusOK, result)
 }
 
 func (h *URLShortener) ping(w http.ResponseWriter, r *http.Request) {
@@ -507,6 +433,58 @@ func (h *URLShortener) setUserID(w http.ResponseWriter, userID uint64) error {
 	http.SetCookie(w, &cookie)
 
 	return nil
+}
+
+func (h *URLShortener) apiParseRequest(r *http.Request, body interface{}) (*apiRequestData, error) {
+	if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
+		h.logger.Error("bad content type", zap.String("content_type", contentType))
+		return nil, ErrBadRequest
+	}
+
+	userID, generated, err := h.getUserID(r)
+	if err != nil {
+		h.logger.Error("failed to generate user id", zap.Error(err))
+		return nil, err
+	}
+
+	b, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.logger.Error("failed to read request body", zap.Error(err))
+		return nil, err
+	}
+
+	if err = json.Unmarshal(b, &body); err != nil {
+		h.logger.Error("failed to unmarshal request json", zap.Error(err))
+		return nil, ErrBadRequest
+	}
+	return &apiRequestData{
+		UserID:        userID,
+		IsIDGenerated: generated,
+	}, nil
+}
+
+func (h *URLShortener) apiWriteResponse(w http.ResponseWriter, reqData *apiRequestData, statusCode int, response interface{}) {
+	dst, err := json.Marshal(response)
+	if err != nil {
+		h.logger.Error("failed to marshal response", zap.Error(err))
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
+	if reqData.IsIDGenerated {
+		if err := h.setUserID(w, reqData.UserID); err != nil {
+			h.logger.Error("failed to set user id", zap.Error(err))
+			http.Error(w, "", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+
+	if _, err := w.Write(dst); err != nil {
+		h.logger.Error("failed to write response body", zap.Error(err))
+	}
 }
 
 func encodeID(id uint64) []byte {

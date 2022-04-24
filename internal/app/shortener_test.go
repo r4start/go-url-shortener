@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/r4start/go-url-shortener/internal/storage"
+	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -34,7 +35,8 @@ func TestURLShortener_ServeHTTP(t *testing.T) {
 		},
 	}
 
-	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage())
+	logger, _ := zap.NewDevelopment()
+	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
 	assert.Nil(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -66,7 +68,8 @@ func TestURLShortener_getURL(t *testing.T) {
 		},
 	}
 
-	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage())
+	logger, _ := zap.NewDevelopment()
+	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
 	assert.Nil(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -168,7 +171,8 @@ func TestURLShortener_shorten(t *testing.T) {
 		},
 	}
 
-	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage())
+	logger, _ := zap.NewDevelopment()
+	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
 	assert.Nil(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -260,7 +264,8 @@ func TestURLShortener_apiShortener(t *testing.T) {
 		},
 	}
 
-	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage())
+	logger, _ := zap.NewDevelopment()
+	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
 	assert.Nil(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -330,7 +335,8 @@ func TestURLShortener_apiBatchShortener(t *testing.T) {
 		},
 	}
 
-	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage())
+	logger, _ := zap.NewDevelopment()
+	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
 	assert.Nil(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
