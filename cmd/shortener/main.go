@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 
+	"go.uber.org/zap"
+
 	_ "github.com/jackc/pgx/v4/stdlib"
 )
 
@@ -53,7 +55,13 @@ func main() {
 
 	defer st.Close()
 
-	handler, err := app.NewURLShortener(dbConn, cfg.BaseURL, st)
+	logger, err := zap.NewProduction()
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Sync()
+
+	handler, err := app.NewURLShortener(dbConn, cfg.BaseURL, st, logger)
 	if err != nil {
 		panic(err)
 	}

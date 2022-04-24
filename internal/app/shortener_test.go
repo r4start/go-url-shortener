@@ -328,39 +328,6 @@ func TestURLShortener_apiBatchShortener(t *testing.T) {
 					`{"correlation_id":"8","short_url":"http://example.com/N2YwNTlmY2E2NGNlZWJjZQ"}]`,
 			},
 		},
-		//{
-		//	name: "Shortener check #3",
-		//	args: args{
-		//		w: httptest.NewRecorder(),
-		//		r: httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader("vc.ru")),
-		//	},
-		//	expected: expected{
-		//		expectedCode:     http.StatusBadRequest,
-		//		expectedResponse: "",
-		//	},
-		//},
-		//{
-		//	name: "Shortener check #4",
-		//	args: args{
-		//		w: httptest.NewRecorder(),
-		//		r: httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader("kajsdhkashd")),
-		//	},
-		//	expected: expected{
-		//		expectedCode:     http.StatusBadRequest,
-		//		expectedResponse: "",
-		//	},
-		//},
-		//{
-		//	name: "Shortener check #5",
-		//	args: args{
-		//		w: httptest.NewRecorder(),
-		//		r: httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader("")),
-		//	},
-		//	expected: expected{
-		//		expectedCode:     http.StatusBadRequest,
-		//		expectedResponse: "",
-		//	},
-		//},
 	}
 
 	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage())
