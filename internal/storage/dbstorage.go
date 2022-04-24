@@ -11,15 +11,16 @@ const (
 	FeedsTable = "feeds"
 
 	CreateFeedsTableScheme = `
-       create table feeds (
+       CREATE TABLE feeds (
 			id bigserial PRIMARY KEY,
 			url_hash bigint not null,
-			url varchar(8192) not null,
+			url varchar(8192) not null UNIQUE,
 			user_id bigint not null,
 			added timestamptz not null DEFAULT now()
 		);`
 
-	InsertFeed = `insert into feeds (url_hash, url, user_id) values (%d, '%s', %d);`
+	InsertFeed = `INSERT INTO feeds (url_hash, url, user_id) VALUES (%d, '%s', %d)` +
+		`ON CONFLICT ON CONSTRAINT feeds_url_key DO NOTHING;`
 )
 
 type dbRow struct {

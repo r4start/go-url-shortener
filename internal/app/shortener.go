@@ -96,7 +96,7 @@ func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
 	defer cancel()
 
-	dst, err := h.generateShortID(ctx, userID, string(b))
+	dst, exists, err := h.generateShortID(ctx, userID, string(b))
 	if err != nil {
 		http.Error(w, "", http.StatusBadRequest)
 		return
@@ -109,7 +109,12 @@ func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.WriteHeader(http.StatusCreated)
+	if !exists {
+		w.WriteHeader(http.StatusCreated)
+	} else {
+		w.WriteHeader(http.StatusConflict)
+	}
+
 	w.Write([]byte(h.makeResultURL(r, dst)))
 }
 
@@ -172,7 +177,7 @@ func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
 	defer cancel()
 
-	dst, err := h.generateShortID(ctx, userID, urlToShorten)
+	dst, exists, err := h.generateShortID(ctx, userID, urlToShorten)
 	if err != nil {
 		http.Error(w, "", http.StatusBadRequest)
 		return
@@ -194,7 +199,11 @@ func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	if !exists {
+		w.WriteHeader(http.StatusCreated)
+	} else {
+		w.WriteHeader(http.StatusConflict)
+	}
 	w.Write(dst)
 }
 
@@ -331,18 +340,18 @@ func (h *URLShortener) ping(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h *URLShortener) generateShortID(ctx context.Context, userID uint64, data string) ([]byte, error) {
+func (h *URLShortener) generateShortID(ctx context.Context, userID uint64, data string) ([]byte, bool, error) {
 	u, err := url.Parse(data)
 	if err != nil || len(u.Hostname()) == 0 {
-		return nil, errors.New("bad input data")
+		return nil, false, errors.New("bad input data")
 	}
 
-	key, _, err := h.urlStorage.Add(ctx, userID, u.String())
+	key, exists, err := h.urlStorage.Add(ctx, userID, u.String())
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return encodeID(key), nil
+	return encodeID(key), exists, nil
 }
 
 func (h *URLShortener) generateShortIDs(ctx context.Context, userID uint64, urls []string) ([][]byte, error) {
