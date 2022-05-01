@@ -163,12 +163,8 @@ func prepareDatabase(conn *sql.DB) error {
 	stmt := fmt.Sprintf("select count(*) from %s;", FeedsTable)
 
 	r, exists := conn.Query(stmt)
-	if err := r.Err(); err != nil {
-		return err
-	}
-
 	if exists == nil {
-		return nil
+		return r.Err()
 	}
 
 	r, err := conn.Query(CreateFeedsTableScheme)
