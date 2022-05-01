@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"flag"
+	"fmt"
 	"github.com/r4start/go-url-shortener/internal/app"
 	"github.com/r4start/go-url-shortener/internal/storage"
 	"net/http"
@@ -32,7 +33,8 @@ func main() {
 
 	logger, err := zap.NewProduction()
 	if err != nil {
-		panic(err)
+		fmt.Printf("failed to initialize logger: %+v", err)
+		os.Exit(1)
 	}
 	defer logger.Sync()
 
@@ -42,14 +44,14 @@ func main() {
 
 	st, dbConn, err := createStorage(&cfg)
 	if err != nil {
-		logger.Panic("failed to create a storage", zap.Error(err))
+		logger.Fatal("failed to create a storage", zap.Error(err))
 	}
 
 	defer st.Close()
 
 	handler, err := app.NewURLShortener(dbConn, cfg.BaseURL, st, logger)
 	if err != nil {
-		logger.Panic("failed to create a storage", zap.Error(err))
+		logger.Fatal("failed to create a storage", zap.Error(err))
 	}
 
 	server := &http.Server{Addr: cfg.ServerAddress, Handler: handler}
