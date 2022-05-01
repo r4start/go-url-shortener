@@ -15,6 +15,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func testShortener(t *testing.T) *URLShortener {
+	logger, _ := zap.NewDevelopment()
+	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
+	assert.Nil(t, err)
+	return h
+}
+
 func TestURLShortener_ServeHTTP(t *testing.T) {
 	type args struct {
 		w *httptest.ResponseRecorder
@@ -35,9 +42,7 @@ func TestURLShortener_ServeHTTP(t *testing.T) {
 		},
 	}
 
-	logger, _ := zap.NewDevelopment()
-	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
-	assert.Nil(t, err)
+	h := testShortener(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h.ServeHTTP(tt.args.w, tt.args.r)
@@ -68,9 +73,7 @@ func TestURLShortener_getURL(t *testing.T) {
 		},
 	}
 
-	logger, _ := zap.NewDevelopment()
-	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
-	assert.Nil(t, err)
+	h := testShortener(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
@@ -171,9 +174,7 @@ func TestURLShortener_shorten(t *testing.T) {
 		},
 	}
 
-	logger, _ := zap.NewDevelopment()
-	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
-	assert.Nil(t, err)
+	h := testShortener(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h.ServeHTTP(tt.args.w, tt.args.r)
@@ -264,9 +265,7 @@ func TestURLShortener_apiShortener(t *testing.T) {
 		},
 	}
 
-	logger, _ := zap.NewDevelopment()
-	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
-	assert.Nil(t, err)
+	h := testShortener(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.args.r.Header.Set("content-type", "application/json")
@@ -335,9 +334,7 @@ func TestURLShortener_apiBatchShortener(t *testing.T) {
 		},
 	}
 
-	logger, _ := zap.NewDevelopment()
-	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
-	assert.Nil(t, err)
+	h := testShortener(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			requests := make([]request, 0)
