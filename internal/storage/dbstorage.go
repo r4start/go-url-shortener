@@ -54,15 +54,18 @@ func (s *dbStorage) Add(ctx context.Context, userID uint64, url string) (uint64,
 	}
 
 	stmt := fmt.Sprintf(InsertFeed, int64(key), url, int64(userID))
-
-	if res, err := s.dbConn.ExecContext(ctx, stmt); err != nil {
+	res, err := s.dbConn.ExecContext(ctx, stmt)
+	if err != nil {
 		return 0, false, err
-	} else {
-		if affected, err := res.RowsAffected(); err != nil {
-			return 0, false, err
-		} else if affected != 0 {
-			return key, false, nil
-		}
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, false, err
+	}
+
+	if affected != 0 {
+		return key, false, nil
 	}
 
 	return key, true, nil
@@ -158,15 +161,20 @@ func (s *dbStorage) Close() error {
 
 func prepareDatabase(conn *sql.DB) error {
 	stmt := fmt.Sprintf("select count(*) from %s;", FeedsTable)
-	if r, exists := conn.Query(stmt); exists != nil {
-		if r, err := conn.Query(CreateFeedsTableScheme); err != nil {
-			return err
-		} else if err := r.Err(); err != nil {
-			return err
-		}
-	} else if err := r.Err(); err != nil {
+
+	r, exists := conn.Query(stmt)
+	if err := r.Err(); err != nil {
 		return err
 	}
 
-	return nil
+	if exists == nil {
+		return nil
+	}
+
+	r, err := conn.Query(CreateFeedsTableScheme)
+	if err != nil {
+		return err
+	}
+
+	return r.Err()
 }

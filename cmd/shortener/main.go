@@ -30,10 +30,33 @@ func main() {
 
 	flag.Parse()
 
+	logger, err := zap.NewProduction()
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Sync()
+
 	if len(cfg.ServerAddress) == 0 {
 		cfg.ServerAddress = ":8080"
 	}
 
+	st, dbConn, err := createStorage(&cfg)
+	if err != nil {
+		logger.Panic("failed to create a storage", zap.Error(err))
+	}
+
+	defer st.Close()
+
+	handler, err := app.NewURLShortener(dbConn, cfg.BaseURL, st, logger)
+	if err != nil {
+		logger.Panic("failed to create a storage", zap.Error(err))
+	}
+
+	server := &http.Server{Addr: cfg.ServerAddress, Handler: handler}
+	server.ListenAndServe()
+}
+
+func createStorage(cfg *config) (storage.URLStorage, *sql.DB, error) {
 	var st storage.URLStorage = nil
 	var dbConn *sql.DB = nil
 	var err error = nil
@@ -49,23 +72,5 @@ func main() {
 		st = storage.NewInMemoryStorage()
 	}
 
-	if err != nil {
-		panic(err)
-	}
-
-	defer st.Close()
-
-	logger, err := zap.NewProduction()
-	if err != nil {
-		panic(err)
-	}
-	defer logger.Sync()
-
-	handler, err := app.NewURLShortener(dbConn, cfg.BaseURL, st, logger)
-	if err != nil {
-		panic(err)
-	}
-
-	server := &http.Server{Addr: cfg.ServerAddress, Handler: handler}
-	server.ListenAndServe()
+	return st, dbConn, err
 }
