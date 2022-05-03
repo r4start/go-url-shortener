@@ -1,14 +1,26 @@
 package app
 
 import (
+	"bytes"
+	"encoding/json"
+	"github.com/r4start/go-url-shortener/internal/storage"
+	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func testShortener(t *testing.T) *URLShortener {
+	logger, _ := zap.NewDevelopment()
+	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
+	assert.Nil(t, err)
+	return h
+}
 
 func TestURLShortener_ServeHTTP(t *testing.T) {
 	type args struct {
@@ -30,8 +42,7 @@ func TestURLShortener_ServeHTTP(t *testing.T) {
 		},
 	}
 
-	h, err := DefaultURLShortener()
-	assert.Nil(t, err)
+	h := testShortener(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h.ServeHTTP(tt.args.w, tt.args.r)
@@ -62,8 +73,7 @@ func TestURLShortener_getURL(t *testing.T) {
 		},
 	}
 
-	h, err := DefaultURLShortener()
-	assert.Nil(t, err)
+	h := testShortener(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
@@ -164,8 +174,7 @@ func TestURLShortener_shorten(t *testing.T) {
 		},
 	}
 
-	h, err := DefaultURLShortener()
-	assert.Nil(t, err)
+	h := testShortener(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h.ServeHTTP(tt.args.w, tt.args.r)
@@ -256,8 +265,7 @@ func TestURLShortener_apiShortener(t *testing.T) {
 		},
 	}
 
-	h, err := DefaultURLShortener()
-	assert.Nil(t, err)
+	h := testShortener(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.args.r.Header.Set("content-type", "application/json")
@@ -274,6 +282,84 @@ func TestURLShortener_apiShortener(t *testing.T) {
 			if result.StatusCode == http.StatusCreated {
 				assert.Equal(t, tt.expectedResponse, string(resBody))
 			}
+		})
+	}
+}
+
+func TestURLShortener_apiBatchShortener(t *testing.T) {
+	type request struct {
+		CorrelationID string `json:"correlation_id"`
+		OriginalURL   string `json:"original_url"`
+	}
+
+	type args struct {
+		URLs []string
+	}
+	type expected struct {
+		expectedCode     int
+		expectedResponse string
+	}
+	tests := []struct {
+		name string
+		args args
+		expected
+	}{
+		{
+			name: "Shortener check #1",
+			args: args{
+				URLs: []string{
+					"http://ya.ru",
+					"http://vc.ru",
+					"http://habr.ru",
+					"http://lenta.ru",
+					"http://vk.ru",
+					"http://ok.ru",
+					"http://vz.ru",
+					"http://ria.ru",
+					"http://goog.le",
+				},
+			},
+			expected: expected{
+				expectedCode: http.StatusCreated,
+				expectedResponse: `[{"correlation_id":"0","short_url":"http://example.com/ZDIyNDk4MzQzMGZmMDQ1ZQ"},` +
+					`{"correlation_id":"1","short_url":"http://example.com/NWI4NTMwNmZjNWJmMjMzYg"},` +
+					`{"correlation_id":"2","short_url":"http://example.com/NGViNTExNTZlMzI2NmNiMw"},` +
+					`{"correlation_id":"3","short_url":"http://example.com/ZTdjMTdjZDVlMTY3YjQ1YQ"},` +
+					`{"correlation_id":"4","short_url":"http://example.com/YTE3MzY4NmZlZDg4NmE2Mw"},` +
+					`{"correlation_id":"5","short_url":"http://example.com/MWE5MGMyYWI3OTVmNDRjZQ"},` +
+					`{"correlation_id":"6","short_url":"http://example.com/MWZlNTFiNmZhNDQyOWNiOA"},` +
+					`{"correlation_id":"7","short_url":"http://example.com/N2NlNjg3NzEyMzQzZGNlZQ"},` +
+					`{"correlation_id":"8","short_url":"http://example.com/N2YwNTlmY2E2NGNlZWJjZQ"}]`,
+			},
+		},
+	}
+
+	h := testShortener(t)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requests := make([]request, 0)
+			for i, u := range tt.args.URLs {
+				requests = append(requests, request{
+					CorrelationID: strconv.FormatUint(uint64(i), 10),
+					OriginalURL:   u,
+				})
+			}
+
+			body, err := json.Marshal(requests)
+			assert.Nil(t, err)
+
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader(body))
+			r.Header.Set("content-type", "application/json")
+			h.ServeHTTP(w, r)
+			result := w.Result()
+
+			defer result.Body.Close()
+			resBody, err := io.ReadAll(result.Body)
+			assert.Nil(t, err)
+
+			assert.Equal(t, tt.expectedCode, result.StatusCode)
+			assert.Equal(t, tt.expectedResponse, string(resBody))
 		})
 	}
 }

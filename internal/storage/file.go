@@ -2,10 +2,13 @@ package storage
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -38,6 +41,7 @@ func NewFileStorage(filePath string) (URLStorage, error) {
 		return storage, nil
 	}
 
+	ctx := context.Background()
 	decoder := json.NewDecoder(file)
 	for {
 		data := make(map[string]string)
@@ -46,8 +50,12 @@ func NewFileStorage(filePath string) (URLStorage, error) {
 		} else if err != nil {
 			return nil, err
 		}
-		for _, v := range data {
-			if _, _, err := storage.memoryStorage.Add(v); err != nil {
+		for k, v := range data {
+			userID, err := strconv.ParseUint(k, 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			if _, _, err := storage.memoryStorage.Add(ctx, userID, v); err != nil {
 				return nil, err
 			}
 		}
@@ -56,8 +64,8 @@ func NewFileStorage(filePath string) (URLStorage, error) {
 	return storage, nil
 }
 
-func (s *fileStorage) Add(url string) (uint64, bool, error) {
-	key, exists, err := s.memoryStorage.Add(url)
+func (s *fileStorage) Add(ctx context.Context, userID uint64, url string) (uint64, bool, error) {
+	key, exists, err := s.memoryStorage.Add(ctx, userID, url)
 	if err != nil {
 		return 0, exists, err
 	}
@@ -66,7 +74,7 @@ func (s *fileStorage) Add(url string) (uint64, bool, error) {
 		return key, exists, err
 	}
 
-	data := fmt.Sprintf("{\"%d\":\"%s\"}\n", key, url)
+	data := fmt.Sprintf("{\"%d\":\"%s\"}\n", userID, url)
 	s.fileLock.Lock()
 	defer s.fileLock.Unlock()
 
@@ -74,13 +82,42 @@ func (s *fileStorage) Add(url string) (uint64, bool, error) {
 		return key, exists, err
 	}
 
-	s.writer.Flush()
-
-	return key, exists, err
+	return key, exists, s.writer.Flush()
 }
 
-func (s *fileStorage) Get(id uint64) (string, error) {
-	return s.memoryStorage.Get(id)
+func (s *fileStorage) Get(ctx context.Context, id uint64) (string, error) {
+	return s.memoryStorage.Get(ctx, id)
+}
+
+func (s *fileStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData, error) {
+	return s.memoryStorage.GetUserData(ctx, userID)
+}
+
+func (s *fileStorage) AddURLs(ctx context.Context, userID uint64, urls []string) ([]AddResult, error) {
+	result, err := s.memoryStorage.AddURLs(ctx, userID, urls)
+	if err != nil {
+		return nil, err
+	}
+
+	dataToAdd := make([]string, 0)
+	for i, key := range result {
+		if !key.Inserted {
+			continue
+		}
+
+		dataToAdd = append(dataToAdd, fmt.Sprintf("{\"%d\":\"%s\"}\n", userID, urls[i]))
+	}
+
+	insertText := strings.Join(dataToAdd, "")
+
+	s.fileLock.Lock()
+	defer s.fileLock.Unlock()
+
+	if _, err := s.writer.WriteString(insertText); err != nil {
+		return nil, err
+	}
+
+	return result, s.writer.Flush()
 }
 
 func (s *fileStorage) Close() error {
