@@ -28,6 +28,9 @@ const (
 	UserIDCookieName = "gusid"
 
 	StorageOperationTimeout = time.Second
+
+	UnlimitedWorkers     = -1
+	MaxWorkersPerRequest = 5
 )
 
 var ErrBadRequest = errors.New("bad request")
@@ -312,22 +315,12 @@ func (h *URLShortener) apiDeleteUserURLs(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ids, err := batchDecodeIDs(r.Context(), requestData)
+	ids, err := batchDecodeIDs(r.Context(), requestData, MaxWorkersPerRequest)
 	if err != nil {
-		h.logger.Error("failed to decode short id", zap.Error(err))
+		h.logger.Error("failed to decode short ids", zap.Error(err))
 		http.Error(w, "", http.StatusBadRequest)
 		return
 	}
-	//ids := make([]uint64, 0)
-	//for _, v := range requestData {
-	//	id, err := decodeID(v)
-	//	if err != nil {
-	//		h.logger.Error("failed to decode short id", zap.Error(err), zap.String("shortid", v))
-	//		http.Error(w, "", http.StatusBadRequest)
-	//		return
-	//	}
-	//	ids = append(ids, id)
-	//}
 
 	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
 	defer cancel()
@@ -558,18 +551,34 @@ func decodeID(data string) (uint64, error) {
 	return key, nil
 }
 
-func batchDecodeIDs(ctx context.Context, strIDs []string) ([]uint64, error) {
-	g, _ := errgroup.WithContext(ctx)
-	ids := make([]uint64, len(strIDs))
-	for i, id := range strIDs {
-		i, id := i, id
-		g.Go(func() error {
-			v, err := decodeID(id)
-			if err != nil {
-				return err
-			}
+func batchDecodeIDs(ctx context.Context, strIDs []string, maxParallel int) ([]uint64, error) {
+	strIDsLength := len(strIDs)
+	batchSize := 1
+	if maxParallel != UnlimitedWorkers {
+		batchSize = strIDsLength / maxParallel
+		if strIDsLength%maxParallel != 0 {
+			batchSize++
+		}
+	}
 
-			ids[i] = v
+	g, _ := errgroup.WithContext(ctx)
+	ids := make([]uint64, strIDsLength)
+
+	for i := 0; i < strIDsLength; i += batchSize {
+		end := i + batchSize
+		if end > strIDsLength {
+			end = strIDsLength
+		}
+		i, idBatch := i, strIDs[i:end]
+		g.Go(func() error {
+			for j, id := range idBatch {
+				v, err := decodeID(id)
+				if err != nil {
+					return err
+				}
+
+				ids[i+j] = v
+			}
 
 			return nil
 		})
