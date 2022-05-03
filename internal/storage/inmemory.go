@@ -30,9 +30,7 @@ func (s *syncMapStorage) Add(ctx context.Context, userID uint64, url string) (ui
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if _, ok := s.goneIds[key]; ok {
-		delete(s.goneIds, key)
-	}
+	delete(s.goneIds, key)
 
 	if _, ok := s.urls[key]; ok {
 		return key, ok, nil
@@ -70,9 +68,7 @@ func (s *syncMapStorage) AddURLs(ctx context.Context, userID uint64, urls []stri
 	defer s.lock.Unlock()
 
 	for i, url := range urls {
-		if _, ok := s.goneIds[keys[i]]; ok {
-			delete(s.goneIds, keys[i])
-		}
+		delete(s.goneIds, keys[i])
 
 		if _, ok := s.urls[keys[i]]; ok {
 			result = append(result, AddResult{

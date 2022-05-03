@@ -215,14 +215,23 @@ func prepareDatabase(conn *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	if err := r.Err(); err != nil {
+		return err
+	}
 
 	r, err = conn.Query(CreateFeedsTableScheme)
 	if err != nil {
 		return err
 	}
+	if err := r.Err(); err != nil {
+		return err
+	}
 
 	r, err = conn.Query(CreateURLHashIndex)
 	if err != nil {
+		return err
+	}
+	if err := r.Err(); err != nil {
 		return err
 	}
 
