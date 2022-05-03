@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/r4start/go-url-shortener/internal/storage"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"io"
 	"net/http"
 	"net/url"
@@ -26,7 +27,7 @@ import (
 const (
 	UserIDCookieName = "gusid"
 
-	StorageOperationTimeout = 100000 * time.Second
+	StorageOperationTimeout = time.Second
 )
 
 var ErrBadRequest = errors.New("bad request")
@@ -311,16 +312,22 @@ func (h *URLShortener) apiDeleteUserURLs(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ids := make([]uint64, 0)
-	for _, v := range requestData {
-		id, err := decodeID(v)
-		if err != nil {
-			h.logger.Error("failed to decode short id", zap.Error(err), zap.String("shortid", v))
-			http.Error(w, "", http.StatusBadRequest)
-			return
-		}
-		ids = append(ids, id)
+	ids, err := batchDecodeIDs(r.Context(), requestData)
+	if err != nil {
+		h.logger.Error("failed to decode short id", zap.Error(err))
+		http.Error(w, "", http.StatusBadRequest)
+		return
 	}
+	//ids := make([]uint64, 0)
+	//for _, v := range requestData {
+	//	id, err := decodeID(v)
+	//	if err != nil {
+	//		h.logger.Error("failed to decode short id", zap.Error(err), zap.String("shortid", v))
+	//		http.Error(w, "", http.StatusBadRequest)
+	//		return
+	//	}
+	//	ids = append(ids, id)
+	//}
 
 	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
 	defer cancel()
@@ -549,6 +556,30 @@ func decodeID(data string) (uint64, error) {
 	}
 
 	return key, nil
+}
+
+func batchDecodeIDs(ctx context.Context, strIDs []string) ([]uint64, error) {
+	g, _ := errgroup.WithContext(ctx)
+	ids := make([]uint64, len(strIDs))
+	for i, id := range strIDs {
+		i, id := i, id
+		g.Go(func() error {
+			v, err := decodeID(id)
+			if err != nil {
+				return err
+			}
+
+			ids[i] = v
+
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	return ids, nil
 }
 
 func cryptoRandUint64() (uint64, error) {

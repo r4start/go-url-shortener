@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"github.com/r4start/go-url-shortener/internal/storage"
 	"go.uber.org/zap"
@@ -362,4 +363,17 @@ func TestURLShortener_apiBatchShortener(t *testing.T) {
 			assert.Equal(t, tt.expectedResponse, string(resBody))
 		})
 	}
+}
+
+func Test_batchDecodeIDs(t *testing.T) {
+	ids := make([]string, 5000)
+	for i := 0; i < len(ids); i++ {
+		ids[i] = "NWI4NTMwNmZjNWJmMjMzYg"
+	}
+
+	t.Run("Batch decode test", func(t *testing.T) {
+		decodedIds, err := batchDecodeIDs(context.Background(), ids)
+		assert.Nil(t, err)
+		assert.Equal(t, len(ids), len(decodedIds))
+	})
 }
