@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"flag"
 	"fmt"
@@ -42,7 +43,10 @@ func main() {
 		cfg.ServerAddress = ":8080"
 	}
 
-	st, dbConn, err := createStorage(&cfg)
+	storageContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	st, dbConn, err := createStorage(storageContext, &cfg)
 	if err != nil {
 		logger.Fatal("failed to create a storage", zap.Error(err))
 	}
@@ -58,7 +62,7 @@ func main() {
 	server.ListenAndServe()
 }
 
-func createStorage(cfg *config) (storage.URLStorage, *sql.DB, error) {
+func createStorage(ctx context.Context, cfg *config) (storage.URLStorage, *sql.DB, error) {
 	var st storage.URLStorage = nil
 	var dbConn *sql.DB = nil
 	var err error = nil
@@ -66,7 +70,7 @@ func createStorage(cfg *config) (storage.URLStorage, *sql.DB, error) {
 	if len(cfg.DatabaseConnectionString) != 0 {
 		dbConn, err = sql.Open("pgx", cfg.DatabaseConnectionString)
 		if err == nil {
-			st, err = storage.NewDatabaseStorage(dbConn)
+			st, err = storage.NewDatabaseStorage(ctx, dbConn)
 		}
 	} else if len(cfg.FileStoragePath) != 0 {
 		st, err = storage.NewFileStorage(cfg.FileStoragePath)

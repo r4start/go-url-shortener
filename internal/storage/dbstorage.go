@@ -43,11 +43,19 @@ type dbRow struct {
 	Added   time.Time
 }
 
-type dbStorage struct {
-	dbConn *sql.DB
+type deleteEntry struct {
+	UserID uint64
+	IDs    []uint64
 }
 
-func NewDatabaseStorage(connection *sql.DB) (URLStorage, error) {
+type dbStorage struct {
+	dbConn     *sql.DB
+	ctx        context.Context
+	ctxCancel  context.CancelFunc
+	deleteChan chan deleteEntry
+}
+
+func NewDatabaseStorage(ctx context.Context, connection *sql.DB) (URLStorage, error) {
 	if err := connection.Ping(); err != nil {
 		return nil, err
 	}
@@ -56,7 +64,17 @@ func NewDatabaseStorage(connection *sql.DB) (URLStorage, error) {
 		return nil, err
 	}
 
-	return &dbStorage{dbConn: connection}, nil
+	ctx, cancel := context.WithCancel(ctx)
+	storage := &dbStorage{
+		dbConn:     connection,
+		ctx:        ctx,
+		ctxCancel:  cancel,
+		deleteChan: make(chan deleteEntry),
+	}
+
+	go storage.deleteURLs()
+
+	return storage, nil
 }
 
 func (s *dbStorage) Add(ctx context.Context, userID uint64, url string) (uint64, bool, error) {
@@ -128,28 +146,34 @@ func (s *dbStorage) AddURLs(ctx context.Context, userID uint64, urls []string) (
 }
 
 func (s *dbStorage) DeleteURLs(ctx context.Context, userID uint64, ids []uint64) error {
-	tx, err := s.dbConn.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+	entry := deleteEntry{
+		UserID: userID,
+		IDs:    make([]uint64, len(ids)),
 	}
-	defer tx.Rollback()
-
-	stmt, err := tx.PrepareContext(ctx, DeleteFeed)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, key := range ids {
-		if _, err := stmt.ExecContext(ctx, int64(key), int64(userID)); err != nil {
-			return err
-		}
-
-	}
-
-	if err := tx.Commit(); err != nil {
-		return err
-	}
+	copy(entry.IDs, ids)
+	s.deleteChan <- entry
+	//tx, err := s.dbConn.BeginTx(ctx, nil)
+	//if err != nil {
+	//	return err
+	//}
+	//defer tx.Rollback()
+	//
+	//stmt, err := tx.PrepareContext(ctx, DeleteFeed)
+	//if err != nil {
+	//	return err
+	//}
+	//defer stmt.Close()
+	//
+	//for _, key := range ids {
+	//	if _, err := stmt.ExecContext(ctx, int64(key), int64(userID)); err != nil {
+	//		return err
+	//	}
+	//
+	//}
+	//
+	//if err := tx.Commit(); err != nil {
+	//	return err
+	//}
 
 	return nil
 }
@@ -168,6 +192,13 @@ func (s *dbStorage) Get(ctx context.Context, id uint64) (string, error) {
 	}
 
 	return url, nil
+}
+
+func (s *dbStorage) Close() error {
+	s.ctxCancel()
+	close(s.deleteChan)
+
+	return s.dbConn.Close()
 }
 
 func (s *dbStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData, error) {
@@ -199,8 +230,60 @@ func (s *dbStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData,
 	return data, nil
 }
 
-func (s *dbStorage) Close() error {
-	return s.dbConn.Close()
+func (s *dbStorage) deleteURLs() {
+	deleteQueue := make(map[uint64][]uint64)
+	ticker := time.NewTicker(10 * time.Second)
+
+	flush := func() {
+		for userID, ids := range deleteQueue {
+			t, cancel := context.WithTimeout(s.ctx, time.Second)
+			s.deleteUserURLs(t, userID, ids)
+			cancel()
+		}
+		deleteQueue = make(map[uint64][]uint64)
+	}
+
+	for {
+		select {
+		case v := <-s.deleteChan:
+			if _, ok := deleteQueue[v.UserID]; !ok {
+				deleteQueue[v.UserID] = make([]uint64, 0)
+			}
+			deleteQueue[v.UserID] = append(deleteQueue[v.UserID], v.IDs...)
+		case <-ticker.C:
+			flush()
+		case <-s.ctx.Done():
+			flush()
+			return
+		}
+	}
+}
+
+func (s *dbStorage) deleteUserURLs(ctx context.Context, userID uint64, ids []uint64) error {
+	tx, err := s.dbConn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, DeleteFeed)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, key := range ids {
+		if _, err := stmt.ExecContext(ctx, int64(key), int64(userID)); err != nil {
+			return err
+		}
+
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func prepareDatabase(conn *sql.DB) error {
