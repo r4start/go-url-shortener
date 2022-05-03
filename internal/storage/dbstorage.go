@@ -10,17 +10,29 @@ import (
 const (
 	FeedsTable = "feeds"
 
+	StateActive   = "active"
+	StateDisabled = "disabled"
+
+	CreateStateEnum = `create type state as enum ('active', 'disabled');`
+
 	CreateFeedsTableScheme = `
        CREATE TABLE feeds (
 			id bigserial PRIMARY KEY,
-			url_hash bigint not null,
+			url_hash bigint not null ,
 			url varchar(8192) not null UNIQUE,
 			user_id bigint not null,
-			added timestamptz not null DEFAULT now()
+			added timestamptz not null DEFAULT now(),
+			flags state not null DEFAULT 'active'
 		);`
+
+	CreateURLHashIndex = `create index url_hash_idx on feeds(url_hash);`
+
+	CreateUserIDIndex = `create index user_id_idx on feeds(user_id);`
 
 	InsertFeed = `INSERT INTO feeds (url_hash, url, user_id) VALUES (%d, '%s', %d)` +
 		`ON CONFLICT ON CONSTRAINT feeds_url_key DO NOTHING;`
+
+	DeleteFeed = `update feeds set flags = 'disabled' where url_hash = $1 and user_id = $2;`
 )
 
 type dbRow struct {
@@ -115,12 +127,44 @@ func (s *dbStorage) AddURLs(ctx context.Context, userID uint64, urls []string) (
 	return result, nil
 }
 
+func (s *dbStorage) DeleteURLs(ctx context.Context, userID uint64, ids []uint64) error {
+	tx, err := s.dbConn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, DeleteFeed)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, key := range ids {
+		if _, err := stmt.ExecContext(ctx, int64(key), int64(userID)); err != nil {
+			return err
+		}
+
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (s *dbStorage) Get(ctx context.Context, id uint64) (string, error) {
 	var url string
+	var state string
 
-	stmt := fmt.Sprintf("select url from %s where url_hash = %d;", FeedsTable, int64(id))
-	if err := s.dbConn.QueryRowContext(ctx, stmt).Scan(&url); err != nil {
+	stmt := fmt.Sprintf("select url, flags from %s where url_hash = %d;", FeedsTable, int64(id))
+	if err := s.dbConn.QueryRowContext(ctx, stmt).Scan(&url, &state); err != nil {
 		return "", err
+	}
+
+	if state == StateDisabled {
+		return "", ErrDeleted
 	}
 
 	return url, nil
@@ -167,7 +211,22 @@ func prepareDatabase(conn *sql.DB) error {
 		return r.Err()
 	}
 
-	r, err := conn.Query(CreateFeedsTableScheme)
+	r, err := conn.Query(CreateStateEnum)
+	if err != nil {
+		return err
+	}
+
+	r, err = conn.Query(CreateFeedsTableScheme)
+	if err != nil {
+		return err
+	}
+
+	r, err = conn.Query(CreateURLHashIndex)
+	if err != nil {
+		return err
+	}
+
+	r, err = conn.Query(CreateUserIDIndex)
 	if err != nil {
 		return err
 	}

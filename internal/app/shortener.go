@@ -26,7 +26,7 @@ import (
 const (
 	UserIDCookieName = "gusid"
 
-	StorageOperationTimeout = time.Second
+	StorageOperationTimeout = 100000 * time.Second
 )
 
 var ErrBadRequest = errors.New("bad request")
@@ -77,7 +77,9 @@ func NewURLShortener(db *sql.DB, domain string, st storage.URLStorage, logger *z
 
 	handler.Get("/{id}", handler.getURL)
 	handler.Get("/ping", handler.ping)
+
 	handler.Get("/api/user/urls", handler.apiUserURLs)
+	handler.Delete("/api/user/urls", handler.apiDeleteUserURLs)
 
 	handler.Post("/", handler.shorten)
 	handler.Post("/api/shorten", handler.apiShortener)
@@ -136,16 +138,9 @@ func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
 
 func (h *URLShortener) getURL(w http.ResponseWriter, r *http.Request) {
 	keyData := chi.URLParam(r, "id")
-	decodedKey, err := base64.RawURLEncoding.DecodeString(keyData)
+	key, err := decodeID(keyData)
 	if err != nil {
 		h.logger.Error("failed to decode short id", zap.Error(err), zap.String("id", keyData))
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-	key, err := strconv.ParseUint(string(decodedKey), 16, 64)
-	if err != nil {
-		h.logger.Error("failed to get id from parsed data", zap.Error(err),
-			zap.String("decoded_key", string(decodedKey)))
 		http.Error(w, "", http.StatusBadRequest)
 		return
 	}
@@ -154,6 +149,11 @@ func (h *URLShortener) getURL(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	u, err := h.urlStorage.Get(ctx, key)
+	if err == storage.ErrDeleted {
+		w.WriteHeader(http.StatusGone)
+		return
+	}
+
 	if err != nil {
 		h.logger.Error("failed to retrieve data from storage", zap.Error(err), zap.Uint64("key", key))
 		http.Error(w, "", http.StatusNotFound)
@@ -217,9 +217,11 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 	requestData := make([]request, 0)
 	reqData, err := h.apiParseRequest(r, &requestData)
 	if errors.Is(err, ErrBadRequest) {
+		h.logger.Error("bad request", zap.Error(err))
 		http.Error(w, "", http.StatusBadRequest)
 		return
 	} else if err != nil {
+		h.logger.Error("failed to parse request", zap.Error(err))
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
@@ -288,6 +290,48 @@ func (h *URLShortener) apiUserURLs(w http.ResponseWriter, r *http.Request) {
 	h.apiWriteResponse(w, &apiRequestData{
 		UserID: userID,
 	}, http.StatusOK, result)
+}
+
+func (h *URLShortener) apiDeleteUserURLs(w http.ResponseWriter, r *http.Request) {
+	requestData := make([]string, 0)
+	reqData, err := h.apiParseRequest(r, &requestData)
+	if errors.Is(err, ErrBadRequest) {
+		h.logger.Error("bad request", zap.Error(err))
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	} else if err != nil {
+		h.logger.Error("failed to parse request", zap.Error(err))
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
+	if reqData.IsIDGenerated {
+		h.logger.Error("unknown user id")
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+
+	ids := make([]uint64, 0)
+	for _, v := range requestData {
+		id, err := decodeID(v)
+		if err != nil {
+			h.logger.Error("failed to decode short id", zap.Error(err), zap.String("shortid", v))
+			http.Error(w, "", http.StatusBadRequest)
+			return
+		}
+		ids = append(ids, id)
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
+	defer cancel()
+
+	if err := h.urlStorage.DeleteURLs(ctx, reqData.UserID, ids); err != nil {
+		h.logger.Error("failed to delete urls", zap.Error(err))
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func (h *URLShortener) ping(w http.ResponseWriter, r *http.Request) {
@@ -492,6 +536,19 @@ func encodeID(id uint64) []byte {
 	dst := make([]byte, base64.RawURLEncoding.EncodedLen(len(keyData)))
 	base64.RawURLEncoding.Encode(dst, keyData)
 	return dst
+}
+
+func decodeID(data string) (uint64, error) {
+	decodedKey, err := base64.RawURLEncoding.DecodeString(data)
+	if err != nil {
+		return 0, err
+	}
+	key, err := strconv.ParseUint(string(decodedKey), 16, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return key, nil
 }
 
 func cryptoRandUint64() (uint64, error) {
