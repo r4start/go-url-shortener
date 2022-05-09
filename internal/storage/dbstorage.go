@@ -33,6 +33,9 @@ const (
 		`ON CONFLICT ON CONSTRAINT feeds_url_key DO NOTHING;`
 
 	DeleteFeed = `update feeds set flags = 'disabled' where url_hash = $1 and user_id = $2;`
+
+	DatabaseFlushTimeout    = 10 * time.Second
+	DatabaseDeleteQueueSize = 1000
 )
 
 type dbRow struct {
@@ -145,35 +148,13 @@ func (s *dbStorage) AddURLs(ctx context.Context, userID uint64, urls []string) (
 	return result, nil
 }
 
-func (s *dbStorage) DeleteURLs(ctx context.Context, userID uint64, ids []uint64) error {
+func (s *dbStorage) DeleteURLs(_ context.Context, userID uint64, ids []uint64) error {
 	entry := deleteEntry{
 		UserID: userID,
 		IDs:    make([]uint64, len(ids)),
 	}
 	copy(entry.IDs, ids)
 	s.deleteChan <- entry
-	//tx, err := s.dbConn.BeginTx(ctx, nil)
-	//if err != nil {
-	//	return err
-	//}
-	//defer tx.Rollback()
-	//
-	//stmt, err := tx.PrepareContext(ctx, DeleteFeed)
-	//if err != nil {
-	//	return err
-	//}
-	//defer stmt.Close()
-	//
-	//for _, key := range ids {
-	//	if _, err := stmt.ExecContext(ctx, int64(key), int64(userID)); err != nil {
-	//		return err
-	//	}
-	//
-	//}
-	//
-	//if err := tx.Commit(); err != nil {
-	//	return err
-	//}
 
 	return nil
 }
@@ -232,7 +213,8 @@ func (s *dbStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData,
 
 func (s *dbStorage) deleteURLs() {
 	deleteQueue := make(map[uint64][]uint64)
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(DatabaseFlushTimeout)
+	queueSize := 0
 
 	flush := func() {
 		for userID, ids := range deleteQueue {
@@ -241,15 +223,21 @@ func (s *dbStorage) deleteURLs() {
 			cancel()
 		}
 		deleteQueue = make(map[uint64][]uint64)
+		queueSize = 0
 	}
 
 	for {
 		select {
 		case v := <-s.deleteChan:
+			queueSize += len(v.IDs)
 			if _, ok := deleteQueue[v.UserID]; !ok {
 				deleteQueue[v.UserID] = make([]uint64, 0)
 			}
 			deleteQueue[v.UserID] = append(deleteQueue[v.UserID], v.IDs...)
+
+			if queueSize > DatabaseDeleteQueueSize {
+				flush()
+			}
 		case <-ticker.C:
 			flush()
 		case <-s.ctx.Done():
