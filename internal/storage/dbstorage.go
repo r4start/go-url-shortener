@@ -3,6 +3,9 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -15,7 +18,7 @@ const (
 	CreateFeedsTableScheme = `
        CREATE TABLE feeds (
 			id bigserial PRIMARY KEY,
-			url_hash bigint not null ,
+			url_hash bigint not null,
 			url varchar(8192) not null UNIQUE,
 			user_id bigint not null,
 			added timestamptz not null DEFAULT now(),
@@ -29,7 +32,7 @@ const (
 	InsertFeed = `INSERT INTO feeds (url_hash, url, user_id) VALUES ($1, $2, $3)` +
 		`ON CONFLICT ON CONSTRAINT feeds_url_key DO NOTHING;`
 
-	DeleteFeed = `update feeds set flags = 'disabled' where user_id = $1 and url_hash in ($2);`
+	DeleteFeed = `update feeds set flags = 'disabled' where user_id = %d and url_hash in (%s);`
 
 	GetFeed = `select url, flags from feeds where url_hash = $1;`
 
@@ -254,13 +257,13 @@ func (s *dbStorage) deleteUserURLs(ctx context.Context, userID uint64, ids []uin
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, DeleteFeed)
-	if err != nil {
-		return err
+	deleteIDs := make([]string, len(ids))
+	for i, e := range ids {
+		deleteIDs[i] = strconv.FormatInt(int64(e), 10)
 	}
-	defer stmt.Close()
+	stmt := fmt.Sprintf(DeleteFeed, int64(userID), strings.Join(deleteIDs, ","))
 
-	if _, err := stmt.ExecContext(ctx, int64(userID), ids); err != nil {
+	if _, err := tx.ExecContext(ctx, stmt); err != nil {
 		return err
 	}
 
