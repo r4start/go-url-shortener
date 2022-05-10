@@ -29,7 +29,7 @@ const (
 	InsertFeed = `INSERT INTO feeds (url_hash, url, user_id) VALUES ($1, $2, $3)` +
 		`ON CONFLICT ON CONSTRAINT feeds_url_key DO NOTHING;`
 
-	DeleteFeed = `update feeds set flags = 'disabled' where url_hash = $1 and user_id = $2;`
+	DeleteFeed = `update feeds set flags = 'disabled' where user_id = $1 and url_hash in ($2);`
 
 	GetFeed = `select url, flags from feeds where url_hash = $1;`
 
@@ -260,11 +260,8 @@ func (s *dbStorage) deleteUserURLs(ctx context.Context, userID uint64, ids []uin
 	}
 	defer stmt.Close()
 
-	for _, key := range ids {
-		if _, err := stmt.ExecContext(ctx, int64(key), int64(userID)); err != nil {
-			return err
-		}
-
+	if _, err := stmt.ExecContext(ctx, int64(userID), ids); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(); err != nil {
