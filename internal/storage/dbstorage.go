@@ -3,13 +3,10 @@ package storage
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"time"
 )
 
 const (
-	FeedsTable = "feeds"
-
 	StateActive   = "active"
 	StateDisabled = "disabled"
 
@@ -29,10 +26,16 @@ const (
 
 	CreateUserIDIndex = `create index user_id_idx on feeds(user_id);`
 
-	InsertFeed = `INSERT INTO feeds (url_hash, url, user_id) VALUES (%d, '%s', %d)` +
+	InsertFeed = `INSERT INTO feeds (url_hash, url, user_id) VALUES ($1, $2, $3)` +
 		`ON CONFLICT ON CONSTRAINT feeds_url_key DO NOTHING;`
 
 	DeleteFeed = `update feeds set flags = 'disabled' where url_hash = $1 and user_id = $2;`
+
+	GetFeed = `select url, flags from feeds where url_hash = $1;`
+
+	GetUserData = `select url_hash, url from feeds where user_id = $1;`
+
+	CheckFeedsTable = `select count(*) from feeds;`
 
 	DatabaseFlushTimeout    = 10 * time.Second
 	DatabaseDeleteQueueSize = 1000
@@ -86,8 +89,7 @@ func (s *dbStorage) Add(ctx context.Context, userID uint64, url string) (uint64,
 		return 0, false, err
 	}
 
-	stmt := fmt.Sprintf(InsertFeed, int64(key), url, int64(userID))
-	res, err := s.dbConn.ExecContext(ctx, stmt)
+	res, err := s.dbConn.ExecContext(ctx, InsertFeed, int64(key), url, int64(userID))
 	if err != nil {
 		return 0, false, err
 	}
@@ -120,7 +122,7 @@ func (s *dbStorage) AddURLs(ctx context.Context, userID uint64, urls []string) (
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, "INSERT INTO feeds (url_hash, url, user_id) VALUES ($1, $2, $3)")
+	stmt, err := tx.PrepareContext(ctx, InsertFeed)
 	if err != nil {
 		return nil, err
 	}
@@ -163,8 +165,7 @@ func (s *dbStorage) Get(ctx context.Context, id uint64) (string, error) {
 	var url string
 	var state string
 
-	stmt := fmt.Sprintf("select url, flags from %s where url_hash = %d;", FeedsTable, int64(id))
-	if err := s.dbConn.QueryRowContext(ctx, stmt).Scan(&url, &state); err != nil {
+	if err := s.dbConn.QueryRowContext(ctx, GetFeed, int64(id)).Scan(&url, &state); err != nil {
 		return "", err
 	}
 
@@ -184,8 +185,7 @@ func (s *dbStorage) Close() error {
 
 func (s *dbStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData, error) {
 	data := make([]UserData, 0)
-	stmt := fmt.Sprintf("select url_hash, url from %s where user_id = %d;", FeedsTable, int64(userID))
-	rows, err := s.dbConn.QueryContext(ctx, stmt)
+	rows, err := s.dbConn.QueryContext(ctx, GetUserData, int64(userID))
 	if err != nil {
 		return nil, err
 	}
@@ -275,9 +275,7 @@ func (s *dbStorage) deleteUserURLs(ctx context.Context, userID uint64, ids []uin
 }
 
 func prepareDatabase(conn *sql.DB) error {
-	stmt := fmt.Sprintf("select count(*) from %s;", FeedsTable)
-
-	r, exists := conn.Query(stmt)
+	r, exists := conn.Query(CheckFeedsTable)
 	if exists == nil {
 		return r.Err()
 	}
