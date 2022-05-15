@@ -36,7 +36,7 @@ const (
 
 	GetFeed = `select url, flags from feeds where url_hash = $1;`
 
-	GetUserData = `select url_hash, url from feeds where user_id = $1;`
+	GetUserData = `select url_hash, url from feeds where user_id = $1 and flags = 'active';`
 
 	CheckFeedsTable = `select count(*) from feeds;`
 

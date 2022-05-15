@@ -53,7 +53,10 @@ func main() {
 
 	defer st.Close()
 
-	handler, err := app.NewURLShortener(dbConn, cfg.BaseURL, st, logger)
+	serverContext, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	handler, err := app.NewURLShortener(serverContext, dbConn, cfg.BaseURL, st, logger)
 	if err != nil {
 		logger.Fatal("failed to create a storage", zap.Error(err))
 	}

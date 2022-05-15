@@ -40,6 +40,11 @@ type apiRequestData struct {
 	IsIDGenerated bool
 }
 
+type deleteData struct {
+	UserID uint64
+	IDs    []string
+}
+
 type URLShortener struct {
 	*chi.Mux
 	urlStorage storage.URLStorage
@@ -48,9 +53,11 @@ type URLShortener struct {
 	privateKey []byte
 	db         *sql.DB
 	logger     *zap.Logger
+	deleteCtx  context.Context
+	deleteChan chan deleteData
 }
 
-func NewURLShortener(db *sql.DB, domain string, st storage.URLStorage, logger *zap.Logger) (*URLShortener, error) {
+func NewURLShortener(ctx context.Context, db *sql.DB, domain string, st storage.URLStorage, logger *zap.Logger) (*URLShortener, error) {
 	privateKey := make([]byte, 32)
 	readBytes, err := rand.Read(privateKey)
 	if err != nil || readBytes != len(privateKey) {
@@ -74,6 +81,8 @@ func NewURLShortener(db *sql.DB, domain string, st storage.URLStorage, logger *z
 		privateKey: privateKey,
 		db:         db,
 		logger:     logger,
+		deleteCtx:  ctx,
+		deleteChan: make(chan deleteData),
 	}
 
 	handler.Use(DecompressGzip)
@@ -92,6 +101,8 @@ func NewURLShortener(db *sql.DB, domain string, st storage.URLStorage, logger *z
 	handler.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusBadRequest)
 	})
+
+	go handler.deleteIDs()
 
 	return handler, nil
 }
@@ -315,20 +326,9 @@ func (h *URLShortener) apiDeleteUserURLs(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ids, err := batchDecodeIDs(r.Context(), requestData, MaxWorkersPerRequest)
-	if err != nil {
-		h.logger.Error("failed to decode short ids", zap.Error(err))
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
-	defer cancel()
-
-	if err := h.urlStorage.DeleteURLs(ctx, reqData.UserID, ids); err != nil {
-		h.logger.Error("failed to delete urls", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
+	h.deleteChan <- deleteData{
+		UserID: reqData.UserID,
+		IDs:    requestData,
 	}
 
 	w.WriteHeader(http.StatusAccepted)
@@ -528,6 +528,25 @@ func (h *URLShortener) apiWriteResponse(w http.ResponseWriter, reqData *apiReque
 
 	if _, err := w.Write(dst); err != nil {
 		h.logger.Error("failed to write response body", zap.Error(err))
+	}
+}
+
+func (h *URLShortener) deleteIDs() {
+	for {
+		select {
+		case <-h.deleteCtx.Done():
+			return
+		case data := <-h.deleteChan:
+			decodedIDs, err := batchDecodeIDs(h.deleteCtx, data.IDs, MaxWorkersPerRequest)
+			if err != nil {
+				h.logger.Error("failed to decode short ids", zap.Error(err))
+				continue
+			}
+
+			if err := h.urlStorage.DeleteURLs(h.deleteCtx, data.UserID, decodedIDs); err != nil {
+				h.logger.Error("failed to delete urls", zap.Error(err))
+			}
+		}
 	}
 }
 

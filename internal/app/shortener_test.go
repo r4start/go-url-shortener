@@ -18,7 +18,7 @@ import (
 
 func testShortener(t *testing.T) *URLShortener {
 	logger, _ := zap.NewDevelopment()
-	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
+	h, err := NewURLShortener(context.Background(), nil, "", storage.NewInMemoryStorage(), logger)
 	assert.Nil(t, err)
 	return h
 }
