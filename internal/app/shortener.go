@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/r4start/go-url-shortener/internal/storage"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"io"
 	"net/http"
 	"net/url"
@@ -27,6 +28,9 @@ const (
 	UserIDCookieName = "gusid"
 
 	StorageOperationTimeout = time.Second
+
+	UnlimitedWorkers     = -1
+	MaxWorkersPerRequest = 5
 )
 
 var ErrBadRequest = errors.New("bad request")
@@ -34,6 +38,11 @@ var ErrBadRequest = errors.New("bad request")
 type apiRequestData struct {
 	UserID        uint64
 	IsIDGenerated bool
+}
+
+type deleteData struct {
+	UserID uint64
+	IDs    []string
 }
 
 type URLShortener struct {
@@ -44,9 +53,11 @@ type URLShortener struct {
 	privateKey []byte
 	db         *sql.DB
 	logger     *zap.Logger
+	deleteCtx  context.Context
+	deleteChan chan deleteData
 }
 
-func NewURLShortener(db *sql.DB, domain string, st storage.URLStorage, logger *zap.Logger) (*URLShortener, error) {
+func NewURLShortener(ctx context.Context, db *sql.DB, domain string, st storage.URLStorage, logger *zap.Logger) (*URLShortener, error) {
 	privateKey := make([]byte, 32)
 	readBytes, err := rand.Read(privateKey)
 	if err != nil || readBytes != len(privateKey) {
@@ -70,6 +81,8 @@ func NewURLShortener(db *sql.DB, domain string, st storage.URLStorage, logger *z
 		privateKey: privateKey,
 		db:         db,
 		logger:     logger,
+		deleteCtx:  ctx,
+		deleteChan: make(chan deleteData),
 	}
 
 	handler.Use(DecompressGzip)
@@ -77,7 +90,9 @@ func NewURLShortener(db *sql.DB, domain string, st storage.URLStorage, logger *z
 
 	handler.Get("/{id}", handler.getURL)
 	handler.Get("/ping", handler.ping)
+
 	handler.Get("/api/user/urls", handler.apiUserURLs)
+	handler.Delete("/api/user/urls", handler.apiDeleteUserURLs)
 
 	handler.Post("/", handler.shorten)
 	handler.Post("/api/shorten", handler.apiShortener)
@@ -86,6 +101,8 @@ func NewURLShortener(db *sql.DB, domain string, st storage.URLStorage, logger *z
 	handler.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusBadRequest)
 	})
+
+	go handler.deleteIDs()
 
 	return handler, nil
 }
@@ -136,16 +153,9 @@ func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
 
 func (h *URLShortener) getURL(w http.ResponseWriter, r *http.Request) {
 	keyData := chi.URLParam(r, "id")
-	decodedKey, err := base64.RawURLEncoding.DecodeString(keyData)
+	key, err := decodeID(keyData)
 	if err != nil {
 		h.logger.Error("failed to decode short id", zap.Error(err), zap.String("id", keyData))
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-	key, err := strconv.ParseUint(string(decodedKey), 16, 64)
-	if err != nil {
-		h.logger.Error("failed to get id from parsed data", zap.Error(err),
-			zap.String("decoded_key", string(decodedKey)))
 		http.Error(w, "", http.StatusBadRequest)
 		return
 	}
@@ -154,6 +164,11 @@ func (h *URLShortener) getURL(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	u, err := h.urlStorage.Get(ctx, key)
+	if err == storage.ErrDeleted {
+		w.WriteHeader(http.StatusGone)
+		return
+	}
+
 	if err != nil {
 		h.logger.Error("failed to retrieve data from storage", zap.Error(err), zap.Uint64("key", key))
 		http.Error(w, "", http.StatusNotFound)
@@ -217,9 +232,11 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 	requestData := make([]request, 0)
 	reqData, err := h.apiParseRequest(r, &requestData)
 	if errors.Is(err, ErrBadRequest) {
+		h.logger.Error("bad request", zap.Error(err))
 		http.Error(w, "", http.StatusBadRequest)
 		return
 	} else if err != nil {
+		h.logger.Error("failed to parse request", zap.Error(err))
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
@@ -288,6 +305,33 @@ func (h *URLShortener) apiUserURLs(w http.ResponseWriter, r *http.Request) {
 	h.apiWriteResponse(w, &apiRequestData{
 		UserID: userID,
 	}, http.StatusOK, result)
+}
+
+func (h *URLShortener) apiDeleteUserURLs(w http.ResponseWriter, r *http.Request) {
+	requestData := make([]string, 0)
+	reqData, err := h.apiParseRequest(r, &requestData)
+	if errors.Is(err, ErrBadRequest) {
+		h.logger.Error("bad request", zap.Error(err))
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	} else if err != nil {
+		h.logger.Error("failed to parse request", zap.Error(err))
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+
+	if reqData.IsIDGenerated {
+		h.logger.Error("unknown user id")
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+
+	h.deleteChan <- deleteData{
+		UserID: reqData.UserID,
+		IDs:    requestData,
+	}
+
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func (h *URLShortener) ping(w http.ResponseWriter, r *http.Request) {
@@ -487,11 +531,83 @@ func (h *URLShortener) apiWriteResponse(w http.ResponseWriter, reqData *apiReque
 	}
 }
 
+func (h *URLShortener) deleteIDs() {
+	for {
+		select {
+		case <-h.deleteCtx.Done():
+			return
+		case data := <-h.deleteChan:
+			decodedIDs, err := batchDecodeIDs(h.deleteCtx, data.IDs, MaxWorkersPerRequest)
+			if err != nil {
+				h.logger.Error("failed to decode short ids", zap.Error(err))
+				continue
+			}
+
+			if err := h.urlStorage.DeleteURLs(h.deleteCtx, data.UserID, decodedIDs); err != nil {
+				h.logger.Error("failed to delete urls", zap.Error(err))
+			}
+		}
+	}
+}
+
 func encodeID(id uint64) []byte {
 	keyData := []byte(strconv.FormatUint(id, 16))
 	dst := make([]byte, base64.RawURLEncoding.EncodedLen(len(keyData)))
 	base64.RawURLEncoding.Encode(dst, keyData)
 	return dst
+}
+
+func decodeID(data string) (uint64, error) {
+	decodedKey, err := base64.RawURLEncoding.DecodeString(data)
+	if err != nil {
+		return 0, err
+	}
+	key, err := strconv.ParseUint(string(decodedKey), 16, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return key, nil
+}
+
+func batchDecodeIDs(ctx context.Context, strIDs []string, maxParallel int) ([]uint64, error) {
+	strIDsLength := len(strIDs)
+	batchSize := 1
+	if maxParallel != UnlimitedWorkers {
+		batchSize = strIDsLength / maxParallel
+		if strIDsLength%maxParallel != 0 {
+			batchSize++
+		}
+	}
+
+	g, _ := errgroup.WithContext(ctx)
+	ids := make([]uint64, strIDsLength)
+
+	for i := 0; i < strIDsLength; i += batchSize {
+		end := i + batchSize
+		if end > strIDsLength {
+			end = strIDsLength
+		}
+		i, idBatch := i, strIDs[i:end]
+		g.Go(func() error {
+			for j, id := range idBatch {
+				v, err := decodeID(id)
+				if err != nil {
+					return err
+				}
+
+				ids[i+j] = v
+			}
+
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	return ids, nil
 }
 
 func cryptoRandUint64() (uint64, error) {

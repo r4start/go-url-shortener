@@ -120,6 +120,10 @@ func (s *fileStorage) AddURLs(ctx context.Context, userID uint64, urls []string)
 	return result, s.writer.Flush()
 }
 
+func (s *fileStorage) DeleteURLs(ctx context.Context, userID uint64, ids []uint64) error {
+	return nil
+}
+
 func (s *fileStorage) Close() error {
 	s.memoryStorage.Close()
 

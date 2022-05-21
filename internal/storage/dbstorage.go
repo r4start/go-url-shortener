@@ -4,11 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
 const (
-	FeedsTable = "feeds"
+	StateActive   = "active"
+	StateDisabled = "disabled"
+
+	CreateStateEnum = `create type state as enum ('active', 'disabled');`
 
 	CreateFeedsTableScheme = `
        CREATE TABLE feeds (
@@ -16,11 +21,27 @@ const (
 			url_hash bigint not null,
 			url varchar(8192) not null UNIQUE,
 			user_id bigint not null,
-			added timestamptz not null DEFAULT now()
+			added timestamptz not null DEFAULT now(),
+			flags state not null DEFAULT 'active'
 		);`
 
-	InsertFeed = `INSERT INTO feeds (url_hash, url, user_id) VALUES (%d, '%s', %d)` +
+	CreateURLHashIndex = `create index url_hash_idx on feeds(url_hash);`
+
+	CreateUserIDIndex = `create index user_id_idx on feeds(user_id);`
+
+	InsertFeed = `INSERT INTO feeds (url_hash, url, user_id) VALUES ($1, $2, $3)` +
 		`ON CONFLICT ON CONSTRAINT feeds_url_key DO NOTHING;`
+
+	DeleteFeed = `update feeds set flags = 'disabled' where user_id = %d and url_hash in (%s);`
+
+	GetFeed = `select url, flags from feeds where url_hash = $1;`
+
+	GetUserData = `select url_hash, url from feeds where user_id = $1 and flags = 'active';`
+
+	CheckFeedsTable = `select count(*) from feeds;`
+
+	DatabaseFlushTimeout    = 10 * time.Second
+	DatabaseDeleteQueueSize = 1000
 )
 
 type dbRow struct {
@@ -31,11 +52,19 @@ type dbRow struct {
 	Added   time.Time
 }
 
-type dbStorage struct {
-	dbConn *sql.DB
+type deleteEntry struct {
+	UserID uint64
+	IDs    []uint64
 }
 
-func NewDatabaseStorage(connection *sql.DB) (URLStorage, error) {
+type dbStorage struct {
+	dbConn     *sql.DB
+	ctx        context.Context
+	ctxCancel  context.CancelFunc
+	deleteChan chan deleteEntry
+}
+
+func NewDatabaseStorage(ctx context.Context, connection *sql.DB) (URLStorage, error) {
 	if err := connection.Ping(); err != nil {
 		return nil, err
 	}
@@ -44,7 +73,17 @@ func NewDatabaseStorage(connection *sql.DB) (URLStorage, error) {
 		return nil, err
 	}
 
-	return &dbStorage{dbConn: connection}, nil
+	ctx, cancel := context.WithCancel(ctx)
+	storage := &dbStorage{
+		dbConn:     connection,
+		ctx:        ctx,
+		ctxCancel:  cancel,
+		deleteChan: make(chan deleteEntry),
+	}
+
+	go storage.deleteURLs()
+
+	return storage, nil
 }
 
 func (s *dbStorage) Add(ctx context.Context, userID uint64, url string) (uint64, bool, error) {
@@ -53,8 +92,7 @@ func (s *dbStorage) Add(ctx context.Context, userID uint64, url string) (uint64,
 		return 0, false, err
 	}
 
-	stmt := fmt.Sprintf(InsertFeed, int64(key), url, int64(userID))
-	res, err := s.dbConn.ExecContext(ctx, stmt)
+	res, err := s.dbConn.ExecContext(ctx, InsertFeed, int64(key), url, int64(userID))
 	if err != nil {
 		return 0, false, err
 	}
@@ -87,7 +125,7 @@ func (s *dbStorage) AddURLs(ctx context.Context, userID uint64, urls []string) (
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, "INSERT INTO feeds (url_hash, url, user_id) VALUES ($1, $2, $3)")
+	stmt, err := tx.PrepareContext(ctx, InsertFeed)
 	if err != nil {
 		return nil, err
 	}
@@ -115,21 +153,42 @@ func (s *dbStorage) AddURLs(ctx context.Context, userID uint64, urls []string) (
 	return result, nil
 }
 
+func (s *dbStorage) DeleteURLs(_ context.Context, userID uint64, ids []uint64) error {
+	entry := deleteEntry{
+		UserID: userID,
+		IDs:    make([]uint64, len(ids)),
+	}
+	copy(entry.IDs, ids)
+	s.deleteChan <- entry
+
+	return nil
+}
+
 func (s *dbStorage) Get(ctx context.Context, id uint64) (string, error) {
 	var url string
+	var state string
 
-	stmt := fmt.Sprintf("select url from %s where url_hash = %d;", FeedsTable, int64(id))
-	if err := s.dbConn.QueryRowContext(ctx, stmt).Scan(&url); err != nil {
+	if err := s.dbConn.QueryRowContext(ctx, GetFeed, int64(id)).Scan(&url, &state); err != nil {
 		return "", err
+	}
+
+	if state == StateDisabled {
+		return "", ErrDeleted
 	}
 
 	return url, nil
 }
 
+func (s *dbStorage) Close() error {
+	s.ctxCancel()
+	close(s.deleteChan)
+
+	return s.dbConn.Close()
+}
+
 func (s *dbStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData, error) {
 	data := make([]UserData, 0)
-	stmt := fmt.Sprintf("select url_hash, url from %s where user_id = %d;", FeedsTable, int64(userID))
-	rows, err := s.dbConn.QueryContext(ctx, stmt)
+	rows, err := s.dbConn.QueryContext(ctx, GetUserData, int64(userID))
 	if err != nil {
 		return nil, err
 	}
@@ -155,19 +214,97 @@ func (s *dbStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData,
 	return data, nil
 }
 
-func (s *dbStorage) Close() error {
-	return s.dbConn.Close()
+func (s *dbStorage) deleteURLs() {
+	deleteQueue := make(map[uint64][]uint64)
+	ticker := time.NewTicker(DatabaseFlushTimeout)
+	queueSize := 0
+
+	flush := func() {
+		for userID, ids := range deleteQueue {
+			t, cancel := context.WithTimeout(s.ctx, time.Second)
+			s.deleteUserURLs(t, userID, ids)
+			cancel()
+		}
+		deleteQueue = make(map[uint64][]uint64)
+		queueSize = 0
+	}
+
+	for {
+		select {
+		case v := <-s.deleteChan:
+			queueSize += len(v.IDs)
+			if _, ok := deleteQueue[v.UserID]; !ok {
+				deleteQueue[v.UserID] = make([]uint64, 0)
+			}
+			deleteQueue[v.UserID] = append(deleteQueue[v.UserID], v.IDs...)
+
+			if queueSize > DatabaseDeleteQueueSize {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
+		case <-s.ctx.Done():
+			flush()
+			return
+		}
+	}
+}
+
+func (s *dbStorage) deleteUserURLs(ctx context.Context, userID uint64, ids []uint64) error {
+	tx, err := s.dbConn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	deleteIDs := make([]string, len(ids))
+	for i, e := range ids {
+		deleteIDs[i] = strconv.FormatInt(int64(e), 10)
+	}
+	stmt := fmt.Sprintf(DeleteFeed, int64(userID), strings.Join(deleteIDs, ","))
+
+	if _, err := tx.ExecContext(ctx, stmt); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func prepareDatabase(conn *sql.DB) error {
-	stmt := fmt.Sprintf("select count(*) from %s;", FeedsTable)
-
-	r, exists := conn.Query(stmt)
+	r, exists := conn.Query(CheckFeedsTable)
 	if exists == nil {
 		return r.Err()
 	}
 
-	r, err := conn.Query(CreateFeedsTableScheme)
+	r, err := conn.Query(CreateStateEnum)
+	if err != nil {
+		return err
+	}
+	if err := r.Err(); err != nil {
+		return err
+	}
+
+	r, err = conn.Query(CreateFeedsTableScheme)
+	if err != nil {
+		return err
+	}
+	if err := r.Err(); err != nil {
+		return err
+	}
+
+	r, err = conn.Query(CreateURLHashIndex)
+	if err != nil {
+		return err
+	}
+	if err := r.Err(); err != nil {
+		return err
+	}
+
+	r, err = conn.Query(CreateUserIDIndex)
 	if err != nil {
 		return err
 	}

@@ -2,13 +2,13 @@ package storage
 
 import (
 	"context"
-	"errors"
 	"sync"
 )
 
 type syncMapStorage struct {
 	urls     map[uint64]string
 	userData map[uint64][]UserData
+	goneIds  map[uint64]bool
 	lock     sync.RWMutex
 }
 
@@ -16,6 +16,7 @@ func NewInMemoryStorage() URLStorage {
 	return &syncMapStorage{
 		urls:     make(map[uint64]string),
 		userData: make(map[uint64][]UserData),
+		goneIds:  make(map[uint64]bool),
 		lock:     sync.RWMutex{},
 	}
 }
@@ -28,6 +29,9 @@ func (s *syncMapStorage) Add(ctx context.Context, userID uint64, url string) (ui
 
 	s.lock.Lock()
 	defer s.lock.Unlock()
+
+	delete(s.goneIds, key)
+
 	if _, ok := s.urls[key]; ok {
 		return key, ok, nil
 	}
@@ -64,6 +68,8 @@ func (s *syncMapStorage) AddURLs(ctx context.Context, userID uint64, urls []stri
 	defer s.lock.Unlock()
 
 	for i, url := range urls {
+		delete(s.goneIds, keys[i])
+
 		if _, ok := s.urls[keys[i]]; ok {
 			result = append(result, AddResult{
 				ID:       keys[i],
@@ -94,22 +100,42 @@ func (s *syncMapStorage) AddURLs(ctx context.Context, userID uint64, urls []stri
 	return result, nil
 }
 
+func (s *syncMapStorage) DeleteURLs(ctx context.Context, userID uint64, ids []uint64) error {
+	return nil
+}
+
 func (s *syncMapStorage) Get(ctx context.Context, id uint64) (string, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+
+	if _, ok := s.goneIds[id]; ok {
+		return "", ErrDeleted
+	}
+
 	if v, ok := s.urls[id]; ok {
 		return v, nil
 	}
-	return "", errors.New("not found")
+	return "", ErrNotFound
 }
 
 func (s *syncMapStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData, error) {
+	result := make([]UserData, 0)
+
 	s.lock.RLock()
 	defer s.lock.RUnlock()
-	if v, ok := s.userData[userID]; ok {
-		return v, nil
+
+	if _, ok := s.userData[userID]; !ok {
+		return nil, ErrNotFound
 	}
-	return nil, errors.New("not found")
+
+	for _, v := range s.userData[userID] {
+		if _, ok := s.goneIds[v.ShortURLID]; ok {
+			continue
+		}
+		result = append(result, v)
+	}
+
+	return result, nil
 }
 
 func (s *syncMapStorage) Close() error {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"github.com/r4start/go-url-shortener/internal/storage"
 	"go.uber.org/zap"
@@ -17,7 +18,7 @@ import (
 
 func testShortener(t *testing.T) *URLShortener {
 	logger, _ := zap.NewDevelopment()
-	h, err := NewURLShortener(nil, "", storage.NewInMemoryStorage(), logger)
+	h, err := NewURLShortener(context.Background(), nil, "", storage.NewInMemoryStorage(), logger)
 	assert.Nil(t, err)
 	return h
 }
@@ -360,6 +361,53 @@ func TestURLShortener_apiBatchShortener(t *testing.T) {
 
 			assert.Equal(t, tt.expectedCode, result.StatusCode)
 			assert.Equal(t, tt.expectedResponse, string(resBody))
+		})
+	}
+}
+
+func Test_batchDecodeIDs(t *testing.T) {
+	ids := make([]string, 5000)
+	for i := 0; i < len(ids); i++ {
+		ids[i] = "NWI4NTMwNmZjNWJmMjMzYg"
+	}
+
+	tests := []struct {
+		name         string
+		ids          []string
+		workersCount int
+	}{
+		{
+			name:         "Batch decode check #1",
+			ids:          ids,
+			workersCount: UnlimitedWorkers,
+		},
+		{
+			name:         "Batch decode check #2",
+			ids:          make([]string, 0),
+			workersCount: UnlimitedWorkers,
+		},
+		{
+			name:         "Batch decode check #3",
+			ids:          ids,
+			workersCount: MaxWorkersPerRequest,
+		},
+		{
+			name:         "Batch decode check #4",
+			ids:          ids,
+			workersCount: 17,
+		},
+		{
+			name:         "Batch decode check #5",
+			ids:          ids,
+			workersCount: len(ids) + 10000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decodedIds, err := batchDecodeIDs(context.Background(), tt.ids, tt.workersCount)
+			assert.Nil(t, err)
+			assert.Equal(t, len(tt.ids), len(decodedIds))
 		})
 	}
 }
