@@ -20,11 +20,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/r4start/go-url-shortener/pkg/storage"
 	"go.uber.org/zap"
 
 	"golang.org/x/sync/errgroup"
-
-	"github.com/r4start/go-url-shortener/internal/storage"
 )
 
 const (

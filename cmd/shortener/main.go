@@ -13,7 +13,7 @@ import (
 	_ "github.com/jackc/pgx/v4/stdlib"
 
 	"github.com/r4start/go-url-shortener/internal/app"
-	"github.com/r4start/go-url-shortener/internal/storage"
+	"github.com/r4start/go-url-shortener/pkg/storage"
 )
 
 type config struct {
