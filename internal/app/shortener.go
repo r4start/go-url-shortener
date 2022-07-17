@@ -243,7 +243,7 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	urls := make([]string, 0)
+	urls := make([]string, 0, len(requestData))
 	for _, e := range requestData {
 		urls = append(urls, e.OriginalURL)
 	}
@@ -258,7 +258,7 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	responseData := make([]response, 0)
+	responseData := make([]response, 0, len(encodedIds))
 	for i, dst := range encodedIds {
 		responseData = append(responseData, response{
 			CorrelationID: requestData[i].CorrelationID,
