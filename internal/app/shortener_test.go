@@ -553,7 +553,7 @@ func BenchmarkURLShortener_shorten(b *testing.B) {
 
 	shortener := benchShortener()
 
-	for i := 0; i < 1000000; i++ {
+	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://ya.ru"))
@@ -590,7 +590,7 @@ func BenchmarkURLShortener_getURL(b *testing.B) {
 	ctx := context.WithValue(r.Context(), chi.RouteCtxKey, rctx)
 	r = r.WithContext(ctx)
 
-	for i := 0; i < 1000000; i++ {
+	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		w := httptest.NewRecorder()
 		b.StartTimer()
@@ -602,7 +602,7 @@ func BenchmarkURLShortener_getURL(b *testing.B) {
 func BenchmarkURLShortener_apiShortener(b *testing.B) {
 	shortener := benchShortener()
 
-	for i := 0; i < 1000000; i++ {
+	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(`{"url":"http://ya.ru"}`))
@@ -638,7 +638,7 @@ func BenchmarkURLShortener_apiBatchShortener(b *testing.B) {
 
 	body, _ := json.Marshal(requests)
 
-	for i := 0; i < 1000000; i++ {
+	for i := 0; i < b.N; i++ {
 		b.StopTimer()
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader(body))
@@ -690,7 +690,7 @@ func BenchmarkURLShortener_apiUserURLs(b *testing.B) {
 		userCookie = c.Value
 	}
 
-	for i := 0; i < 1000000; i++ {
+	for i := 0; i < b.N; i++ {
 		w = httptest.NewRecorder()
 		r = httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
 		r.Header.Set("content-type", "application/json")
