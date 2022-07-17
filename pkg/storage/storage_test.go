@@ -312,7 +312,7 @@ func Test_syncMapStorage_Get(t *testing.T) {
 					return
 				}
 				assert.Nil(t, err)
-			} else if err == nil && tt.wantErr {
+			} else if tt.wantErr {
 				assert.False(t, true, "[%s]Wanted error, but none was returned", tt.name)
 			}
 
@@ -394,7 +394,7 @@ func Test_syncMapStorage_GetUserData(t *testing.T) {
 					return
 				}
 				assert.Nil(t, err)
-			} else if err == nil && tt.wantErr {
+			} else if tt.wantErr {
 				assert.False(t, true, "[%s]Wanted error, but none was returned", tt.name)
 			}
 
