@@ -13,15 +13,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/go-chi/chi/v5"
-	"github.com/r4start/go-url-shortener/internal/storage"
-	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
+
+	"golang.org/x/sync/errgroup"
+
+	"github.com/r4start/go-url-shortener/internal/storage"
 )
 
 const (
@@ -467,14 +470,8 @@ func (h *URLShortener) setUserID(w http.ResponseWriter, userID uint64) error {
 
 	cipherText = append(sum, cipherText...)
 	encoder := base64.URLEncoding.WithPadding(base64.NoPadding)
-	encodedText := encoder.EncodeToString(cipherText)
 
-	cookie := http.Cookie{
-		Name:  UserIDCookieName,
-		Value: encodedText,
-		Path:  "/",
-	}
-	http.SetCookie(w, &cookie)
+	w.Header().Set("set-cookie", fmt.Sprintf(`%s=%s; Path=/`, UserIDCookieName, encoder.EncodeToString(cipherText)))
 
 	return nil
 }
