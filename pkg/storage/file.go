@@ -19,6 +19,7 @@ type fileStorage struct {
 	memoryStorage URLStorage
 }
 
+// NewFileStorage creates URLStorage implementation that defines methods over a regular file.
 func NewFileStorage(filePath string) (URLStorage, error) {
 	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_APPEND|os.O_CREATE|os.O_SYNC, 0644)
 	if err != nil {

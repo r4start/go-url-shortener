@@ -12,6 +12,7 @@ type syncMapStorage struct {
 	lock     sync.RWMutex
 }
 
+// NewInMemoryStorage creates URLStorage implementation that doesn't have any persistent storage.
 func NewInMemoryStorage() URLStorage {
 	return &syncMapStorage{
 		urls:     make(map[uint64]string),

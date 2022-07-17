@@ -64,6 +64,7 @@ type dbStorage struct {
 	deleteChan chan deleteEntry
 }
 
+// NewDatabaseStorage creates URLStorage implementation that defines methods over PostgreSQL database.
 func NewDatabaseStorage(ctx context.Context, connection *sql.DB) (URLStorage, error) {
 	if err := connection.Ping(); err != nil {
 		return nil, err
