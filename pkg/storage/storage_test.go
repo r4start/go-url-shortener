@@ -441,7 +441,7 @@ func ExampleNewInMemoryStorage() {
 	if err != nil {
 		// Some error handling
 	}
-	fmt.Printf("User data: %s", userInfo)
+	fmt.Printf("User data: %+v", userInfo)
 
 	// Delete url
 	if err := s.DeleteURLs(ctx, userID, []uint64{urlID}); err != nil {
@@ -495,7 +495,7 @@ func ExampleNewDatabaseStorage() {
 	if err != nil {
 		// Some error handling
 	}
-	fmt.Printf("User data: %s", userInfo)
+	fmt.Printf("User data: %+v", userInfo)
 
 	// Delete url
 	if err := s.DeleteURLs(ctx, userID, []uint64{urlID}); err != nil {
@@ -548,7 +548,7 @@ func ExampleNewFileStorage() {
 	if err != nil {
 		// Some error handling
 	}
-	fmt.Printf("User data: %s", userInfo)
+	fmt.Printf("User data: %+v", userInfo)
 
 	// Delete url
 	if err := s.DeleteURLs(ctx, userID, []uint64{urlID}); err != nil {
