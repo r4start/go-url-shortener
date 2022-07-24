@@ -36,9 +36,13 @@ func main() {
 	logger, err := zap.NewProduction()
 	if err != nil {
 		fmt.Printf("failed to initialize logger: %+v", err)
-		os.Exit(1)
+		return
 	}
-	defer logger.Sync()
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			fmt.Println(err)
+		}
+	}()
 
 	if len(cfg.ServerAddress) == 0 {
 		cfg.ServerAddress = ":8080"
@@ -52,7 +56,11 @@ func main() {
 		logger.Fatal("failed to create a storage", zap.Error(err))
 	}
 
-	defer st.Close()
+	defer func() {
+		if err := st.Close(); err != nil {
+			fmt.Println(err)
+		}
+	}()
 
 	serverContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -63,7 +71,9 @@ func main() {
 	}
 
 	server := &http.Server{Addr: cfg.ServerAddress, Handler: handler}
-	server.ListenAndServe()
+	if err := server.ListenAndServe(); err != nil {
+		logger.Fatal("failed to create a storage", zap.Error(err))
+	}
 }
 
 func createStorage(ctx context.Context, cfg *config) (storage.URLStorage, *sql.DB, error) {

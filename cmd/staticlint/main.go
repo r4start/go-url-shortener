@@ -9,7 +9,6 @@ import (
 	"golang.org/x/tools/go/analysis/passes/fieldalignment"
 	"golang.org/x/tools/go/analysis/passes/httpresponse"
 	"golang.org/x/tools/go/analysis/passes/printf"
-	"golang.org/x/tools/go/analysis/passes/shadow"
 	"golang.org/x/tools/go/analysis/passes/structtag"
 
 	"github.com/agnivade/sqlargs"
@@ -26,7 +25,6 @@ func main() {
 		fieldalignment.Analyzer,
 		httpresponse.Analyzer,
 		printf.Analyzer,
-		shadow.Analyzer,
 		structtag.Analyzer,
 		sqlargs.Analyzer,
 		OsExitAnalyzer,
@@ -40,7 +38,7 @@ func main() {
 	}
 
 	for _, v := range staticcheck.Analyzers {
-		if stChecks[v.Name] || (strings.HasPrefix(v.Name, "SA") && !strings.HasPrefix(v.Name, "SA4")) {
+		if stChecks[v.Name] || strings.HasPrefix(v.Name, "SA") {
 			checks = append(checks, v)
 		}
 	}
