@@ -5,14 +5,15 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
-	"github.com/r4start/go-url-shortener/internal/app"
-	"github.com/r4start/go-url-shortener/internal/storage"
 	"net/http"
 	"os"
 
 	"go.uber.org/zap"
 
 	_ "github.com/jackc/pgx/v4/stdlib"
+
+	"github.com/r4start/go-url-shortener/internal/app"
+	"github.com/r4start/go-url-shortener/pkg/storage"
 )
 
 type config struct {

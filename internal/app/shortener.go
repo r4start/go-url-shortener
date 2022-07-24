@@ -13,15 +13,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/go-chi/chi/v5"
-	"github.com/r4start/go-url-shortener/internal/storage"
-	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/r4start/go-url-shortener/pkg/storage"
+	"go.uber.org/zap"
+
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -241,7 +243,7 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	urls := make([]string, 0)
+	urls := make([]string, 0, len(requestData))
 	for _, e := range requestData {
 		urls = append(urls, e.OriginalURL)
 	}
@@ -256,7 +258,7 @@ func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	responseData := make([]response, 0)
+	responseData := make([]response, 0, len(encodedIds))
 	for i, dst := range encodedIds {
 		responseData = append(responseData, response{
 			CorrelationID: requestData[i].CorrelationID,
@@ -467,14 +469,8 @@ func (h *URLShortener) setUserID(w http.ResponseWriter, userID uint64) error {
 
 	cipherText = append(sum, cipherText...)
 	encoder := base64.URLEncoding.WithPadding(base64.NoPadding)
-	encodedText := encoder.EncodeToString(cipherText)
 
-	cookie := http.Cookie{
-		Name:  UserIDCookieName,
-		Value: encodedText,
-		Path:  "/",
-	}
-	http.SetCookie(w, &cookie)
+	w.Header().Set("set-cookie", fmt.Sprintf(`%s=%s; Path=/`, UserIDCookieName, encoder.EncodeToString(cipherText)))
 
 	return nil
 }

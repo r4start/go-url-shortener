@@ -10,12 +10,12 @@ import (
 )
 
 const (
-	StateActive   = "active"
-	StateDisabled = "disabled"
+	stateActive   = "active"
+	stateDisabled = "disabled"
 
-	CreateStateEnum = `create type state as enum ('active', 'disabled');`
+	createStateEnum = `create type state as enum ('active', 'disabled');`
 
-	CreateFeedsTableScheme = `
+	createFeedsTableScheme = `
        CREATE TABLE feeds (
 			id bigserial PRIMARY KEY,
 			url_hash bigint not null,
@@ -25,23 +25,23 @@ const (
 			flags state not null DEFAULT 'active'
 		);`
 
-	CreateURLHashIndex = `create index url_hash_idx on feeds(url_hash);`
+	createURLHashIndex = `create index url_hash_idx on feeds(url_hash);`
 
-	CreateUserIDIndex = `create index user_id_idx on feeds(user_id);`
+	createUserIDIndex = `create index user_id_idx on feeds(user_id);`
 
-	InsertFeed = `INSERT INTO feeds (url_hash, url, user_id) VALUES ($1, $2, $3)` +
+	insertFeed = `INSERT INTO feeds (url_hash, url, user_id) VALUES ($1, $2, $3)` +
 		`ON CONFLICT ON CONSTRAINT feeds_url_key DO NOTHING;`
 
-	DeleteFeed = `update feeds set flags = 'disabled' where user_id = %d and url_hash in (%s);`
+	deleteFeed = `update feeds set flags = 'disabled' where user_id = %d and url_hash in (%s);`
 
-	GetFeed = `select url, flags from feeds where url_hash = $1;`
+	getFeed = `select url, flags from feeds where url_hash = $1;`
 
-	GetUserData = `select url_hash, url from feeds where user_id = $1 and flags = 'active';`
+	getUserData = `select url_hash, url from feeds where user_id = $1 and flags = 'active';`
 
-	CheckFeedsTable = `select count(*) from feeds;`
+	checkFeedsTable = `select count(*) from feeds;`
 
-	DatabaseFlushTimeout    = 10 * time.Second
-	DatabaseDeleteQueueSize = 1000
+	databaseFlushTimeout    = 10 * time.Second
+	databaseDeleteQueueSize = 1000
 )
 
 type dbRow struct {
@@ -64,6 +64,7 @@ type dbStorage struct {
 	deleteChan chan deleteEntry
 }
 
+// NewDatabaseStorage creates URLStorage implementation that defines methods over PostgreSQL database.
 func NewDatabaseStorage(ctx context.Context, connection *sql.DB) (URLStorage, error) {
 	if err := connection.Ping(); err != nil {
 		return nil, err
@@ -87,12 +88,12 @@ func NewDatabaseStorage(ctx context.Context, connection *sql.DB) (URLStorage, er
 }
 
 func (s *dbStorage) Add(ctx context.Context, userID uint64, url string) (uint64, bool, error) {
-	key, err := generateKey(&url)
+	key, err := generateKey(url)
 	if err != nil {
 		return 0, false, err
 	}
 
-	res, err := s.dbConn.ExecContext(ctx, InsertFeed, int64(key), url, int64(userID))
+	res, err := s.dbConn.ExecContext(ctx, insertFeed, int64(key), url, int64(userID))
 	if err != nil {
 		return 0, false, err
 	}
@@ -112,7 +113,7 @@ func (s *dbStorage) Add(ctx context.Context, userID uint64, url string) (uint64,
 func (s *dbStorage) AddURLs(ctx context.Context, userID uint64, urls []string) ([]AddResult, error) {
 	keys := make([]uint64, 0)
 	for _, url := range urls {
-		key, err := generateKey(&url)
+		key, err := generateKey(url)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +126,7 @@ func (s *dbStorage) AddURLs(ctx context.Context, userID uint64, urls []string) (
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, InsertFeed)
+	stmt, err := tx.PrepareContext(ctx, insertFeed)
 	if err != nil {
 		return nil, err
 	}
@@ -168,11 +169,11 @@ func (s *dbStorage) Get(ctx context.Context, id uint64) (string, error) {
 	var url string
 	var state string
 
-	if err := s.dbConn.QueryRowContext(ctx, GetFeed, int64(id)).Scan(&url, &state); err != nil {
+	if err := s.dbConn.QueryRowContext(ctx, getFeed, int64(id)).Scan(&url, &state); err != nil {
 		return "", err
 	}
 
-	if state == StateDisabled {
+	if state == stateDisabled {
 		return "", ErrDeleted
 	}
 
@@ -188,7 +189,7 @@ func (s *dbStorage) Close() error {
 
 func (s *dbStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData, error) {
 	data := make([]UserData, 0)
-	rows, err := s.dbConn.QueryContext(ctx, GetUserData, int64(userID))
+	rows, err := s.dbConn.QueryContext(ctx, getUserData, int64(userID))
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +217,7 @@ func (s *dbStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData,
 
 func (s *dbStorage) deleteURLs() {
 	deleteQueue := make(map[uint64][]uint64)
-	ticker := time.NewTicker(DatabaseFlushTimeout)
+	ticker := time.NewTicker(databaseFlushTimeout)
 	queueSize := 0
 
 	flush := func() {
@@ -238,7 +239,7 @@ func (s *dbStorage) deleteURLs() {
 			}
 			deleteQueue[v.UserID] = append(deleteQueue[v.UserID], v.IDs...)
 
-			if queueSize > DatabaseDeleteQueueSize {
+			if queueSize > databaseDeleteQueueSize {
 				flush()
 			}
 		case <-ticker.C:
@@ -261,7 +262,7 @@ func (s *dbStorage) deleteUserURLs(ctx context.Context, userID uint64, ids []uin
 	for i, e := range ids {
 		deleteIDs[i] = strconv.FormatInt(int64(e), 10)
 	}
-	stmt := fmt.Sprintf(DeleteFeed, int64(userID), strings.Join(deleteIDs, ","))
+	stmt := fmt.Sprintf(deleteFeed, int64(userID), strings.Join(deleteIDs, ","))
 
 	if _, err := tx.ExecContext(ctx, stmt); err != nil {
 		return err
@@ -275,12 +276,12 @@ func (s *dbStorage) deleteUserURLs(ctx context.Context, userID uint64, ids []uin
 }
 
 func prepareDatabase(conn *sql.DB) error {
-	r, exists := conn.Query(CheckFeedsTable)
+	r, exists := conn.Query(checkFeedsTable)
 	if exists == nil {
 		return r.Err()
 	}
 
-	r, err := conn.Query(CreateStateEnum)
+	r, err := conn.Query(createStateEnum)
 	if err != nil {
 		return err
 	}
@@ -288,7 +289,7 @@ func prepareDatabase(conn *sql.DB) error {
 		return err
 	}
 
-	r, err = conn.Query(CreateFeedsTableScheme)
+	r, err = conn.Query(createFeedsTableScheme)
 	if err != nil {
 		return err
 	}
@@ -296,7 +297,7 @@ func prepareDatabase(conn *sql.DB) error {
 		return err
 	}
 
-	r, err = conn.Query(CreateURLHashIndex)
+	r, err = conn.Query(createURLHashIndex)
 	if err != nil {
 		return err
 	}
@@ -304,7 +305,7 @@ func prepareDatabase(conn *sql.DB) error {
 		return err
 	}
 
-	r, err = conn.Query(CreateUserIDIndex)
+	r, err = conn.Query(createUserIDIndex)
 	if err != nil {
 		return err
 	}

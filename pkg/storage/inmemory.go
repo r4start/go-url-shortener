@@ -12,6 +12,7 @@ type syncMapStorage struct {
 	lock     sync.RWMutex
 }
 
+// NewInMemoryStorage creates URLStorage implementation that doesn't have any persistent storage.
 func NewInMemoryStorage() URLStorage {
 	return &syncMapStorage{
 		urls:     make(map[uint64]string),
@@ -22,7 +23,7 @@ func NewInMemoryStorage() URLStorage {
 }
 
 func (s *syncMapStorage) Add(ctx context.Context, userID uint64, url string) (uint64, bool, error) {
-	key, err := generateKey(&url)
+	key, err := generateKey(url)
 	if err != nil {
 		return 0, false, err
 	}
@@ -55,7 +56,7 @@ func (s *syncMapStorage) Add(ctx context.Context, userID uint64, url string) (ui
 func (s *syncMapStorage) AddURLs(ctx context.Context, userID uint64, urls []string) ([]AddResult, error) {
 	keys := make([]uint64, 0)
 	for _, url := range urls {
-		key, err := generateKey(&url)
+		key, err := generateKey(url)
 		if err != nil {
 			return nil, err
 		}
@@ -101,6 +102,40 @@ func (s *syncMapStorage) AddURLs(ctx context.Context, userID uint64, urls []stri
 }
 
 func (s *syncMapStorage) DeleteURLs(ctx context.Context, userID uint64, ids []uint64) error {
+	idsToDelete := make([]uint64, 0, len(ids))
+	userIDs := make(map[uint64]bool)
+
+	s.lock.RLock()
+	// As a first step we need to sort out whether an id is in our storage.
+	// We don't want to mark missed keys as deleted.
+	// Moreover, we need to check whether an id is owned by a particular user.
+	userData, actualUser := s.userData[userID]
+	if !actualUser {
+		s.lock.RUnlock()
+		return ErrNotFound
+	}
+
+	for _, e := range userData {
+		userIDs[e.ShortURLID] = true
+	}
+	s.lock.RUnlock()
+
+	for _, id := range ids {
+		if _, ok := userIDs[id]; ok {
+			idsToDelete = append(idsToDelete, id)
+		}
+	}
+
+	if len(idsToDelete) == 0 {
+		return nil
+	}
+
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	for _, id := range idsToDelete {
+		s.goneIds[id] = true
+	}
+
 	return nil
 }
 
