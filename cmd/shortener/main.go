@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"embed"
+	_ "embed"
 	"flag"
 	"fmt"
 	"net/http"
@@ -16,6 +18,13 @@ import (
 	"github.com/r4start/go-url-shortener/pkg/storage"
 )
 
+//go:generate sh -c "git branch --show-current > branch.txt"
+//go:generate sh -c "printf %s $(git rev-parse HEAD) > commit.txt"
+//go:generate sh -c "sh -c 'date +%Y-%m-%dT%H:%M:%S' > date.txt"
+
+//go:embed *
+var buildInfo embed.FS
+
 type config struct {
 	ServerAddress            string `env:"SERVER_ADDRESS" envDefault:":8080"`
 	BaseURL                  string `env:"BASE_URL"`
@@ -24,6 +33,8 @@ type config struct {
 }
 
 func main() {
+	printStartupMessage()
+
 	cfg := config{}
 
 	flag.StringVar(&cfg.ServerAddress, "a", os.Getenv("SERVER_ADDRESS"), "")
@@ -93,4 +104,26 @@ func createStorage(ctx context.Context, cfg *config) (storage.URLStorage, *sql.D
 	}
 
 	return st, dbConn, err
+}
+
+func printStartupMessage() {
+	buildVersion := "N/A\n"
+	buildDate := buildVersion
+	buildCommit := buildVersion
+
+	if data, err := buildInfo.ReadFile("branch.txt"); err == nil {
+		buildVersion = string(data)
+	}
+
+	if data, err := buildInfo.ReadFile("commit.txt"); err == nil {
+		buildCommit = string(data)
+	}
+
+	if data, err := buildInfo.ReadFile("date.txt"); err == nil {
+		buildDate = string(data)
+	}
+
+	fmt.Printf("Build version: %s", buildVersion)
+	fmt.Printf("Build date: %s", buildDate)
+	fmt.Printf("Build commit: %s\n\n", buildCommit)
 }
