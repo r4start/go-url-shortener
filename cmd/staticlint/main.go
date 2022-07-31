@@ -38,7 +38,7 @@ func main() {
 	}
 
 	for _, v := range staticcheck.Analyzers {
-		if stChecks[v.Name] || strings.HasPrefix(v.Name, "SA") {
+		if stChecks[v.Name] || strings.HasPrefix(v.Name, "S1") || strings.HasPrefix(v.Name, "SA") {
 			checks = append(checks, v)
 		}
 	}
