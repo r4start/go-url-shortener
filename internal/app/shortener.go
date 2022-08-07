@@ -392,7 +392,13 @@ func (h *URLShortener) makeResultURL(r *http.Request, data []byte) string {
 	if len(h.domain) != 0 {
 		return fmt.Sprintf("%s/%s", h.domain, string(data))
 	}
-	return fmt.Sprintf("http://%s/%s", r.Host, string(data))
+
+	protocol := "http"
+	if r.TLS != nil {
+		protocol = "https"
+	}
+
+	return fmt.Sprintf("%s://%s/%s", protocol, r.Host, string(data))
 }
 
 func (h *URLShortener) getUserID(r *http.Request) (uint64, bool, error) {

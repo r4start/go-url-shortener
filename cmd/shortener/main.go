@@ -24,11 +24,23 @@ import (
 //go:embed *
 var buildInfo embed.FS
 
+//go:embed key.pem
+var serverKey []byte
+
+//go:embed cert.pem
+var serverCert []byte
+
+const (
+	serverKeyFileName  = "key.pem"
+	serverCertFileName = "cert.pem"
+)
+
 type config struct {
 	ServerAddress            string `env:"SERVER_ADDRESS" envDefault:":8080"`
 	BaseURL                  string `env:"BASE_URL"`
 	FileStoragePath          string `env:"FILE_STORAGE_PATH"`
 	DatabaseConnectionString string `env:"DATABASE_DSN"`
+	ServeTLS                 bool   `env:"ENABLE_HTTPS"`
 }
 
 func main() {
@@ -40,6 +52,12 @@ func main() {
 	flag.StringVar(&cfg.BaseURL, "b", os.Getenv("BASE_URL"), "")
 	flag.StringVar(&cfg.FileStoragePath, "f", os.Getenv("FILE_STORAGE_PATH"), "")
 	flag.StringVar(&cfg.DatabaseConnectionString, "d", os.Getenv("DATABASE_DSN"), "")
+
+	if _, exists := os.LookupEnv("ENABLE_HTTPS"); exists {
+		flag.BoolVar(&cfg.ServeTLS, "s", true, "")
+	} else {
+		flag.BoolVar(&cfg.ServeTLS, "s", false, "")
+	}
 
 	flag.Parse()
 
@@ -81,7 +99,20 @@ func main() {
 	}
 
 	server := &http.Server{Addr: cfg.ServerAddress, Handler: handler}
-	if err := server.ListenAndServe(); err != nil {
+
+	if cfg.ServeTLS {
+		if err := prepareTLSFile(serverKeyFileName, serverKey); err != nil {
+			logger.Fatal("failed to create a key file", zap.Error(err))
+		}
+		if err := prepareTLSFile(serverCertFileName, serverCert); err != nil {
+			logger.Fatal("failed to create a cert file", zap.Error(err))
+		}
+		err = server.ListenAndServeTLS(serverCertFileName, serverKeyFileName)
+	} else {
+		err = server.ListenAndServe()
+	}
+
+	if err != nil {
 		logger.Fatal("failed to create a storage", zap.Error(err))
 	}
 }
@@ -125,4 +156,23 @@ func printStartupMessage() {
 	fmt.Printf("Build version: %s", buildVersion)
 	fmt.Printf("Build date: %s", buildDate)
 	fmt.Printf("Build commit: %s\n\n", buildCommit)
+}
+
+func prepareTLSFile(name string, data []byte) error {
+	var file *os.File
+	if _, err := os.Stat(name); err == nil {
+		// File doesn't exist. Let's create it.
+		file, err = os.Create(name)
+		if err != nil {
+			return err
+		}
+	} else {
+		file, err = os.Open(name)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err := file.Write(data)
+	return err
 }
