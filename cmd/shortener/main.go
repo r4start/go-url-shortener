@@ -159,20 +159,12 @@ func printStartupMessage() {
 }
 
 func prepareTLSFile(name string, data []byte) error {
-	var file *os.File
-	if _, err := os.Stat(name); err == nil {
-		// File doesn't exist. Let's create it.
-		file, err = os.Create(name)
-		if err != nil {
-			return err
-		}
-	} else {
-		file, err = os.Open(name)
-		if err != nil {
-			return err
-		}
+	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
 	}
+	defer file.Close()
 
-	_, err := file.Write(data)
+	_, err = file.Write(data)
 	return err
 }
