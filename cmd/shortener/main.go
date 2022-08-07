@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -36,11 +37,12 @@ const (
 )
 
 type config struct {
-	ServerAddress            string `env:"SERVER_ADDRESS" envDefault:":8080"`
-	BaseURL                  string `env:"BASE_URL"`
-	FileStoragePath          string `env:"FILE_STORAGE_PATH"`
-	DatabaseConnectionString string `env:"DATABASE_DSN"`
-	ServeTLS                 bool   `env:"ENABLE_HTTPS"`
+	ServerAddress            string `json:"server_address" env:"SERVER_ADDRESS" envDefault:":8080"`
+	BaseURL                  string `json:"base_url" env:"BASE_URL"`
+	FileStoragePath          string `json:"file_storage_path" env:"FILE_STORAGE_PATH"`
+	DatabaseConnectionString string `json:"database_dsn" env:"DATABASE_DSN"`
+	ServeTLS                 bool   `json:"enable_https" env:"ENABLE_HTTPS"`
+	configFile               string
 }
 
 func main() {
@@ -52,6 +54,7 @@ func main() {
 	flag.StringVar(&cfg.BaseURL, "b", os.Getenv("BASE_URL"), "")
 	flag.StringVar(&cfg.FileStoragePath, "f", os.Getenv("FILE_STORAGE_PATH"), "")
 	flag.StringVar(&cfg.DatabaseConnectionString, "d", os.Getenv("DATABASE_DSN"), "")
+	flag.StringVar(&cfg.configFile, "c", os.Getenv("CONFIG"), "")
 
 	if _, exists := os.LookupEnv("ENABLE_HTTPS"); exists {
 		flag.BoolVar(&cfg.ServeTLS, "s", true, "")
@@ -71,6 +74,14 @@ func main() {
 			fmt.Println(err)
 		}
 	}()
+
+	if len(cfg.configFile) != 0 {
+		c, err := loadConfigFromFile(cfg.configFile)
+		if err != nil {
+			logger.Fatal("failed to load config file", zap.Error(err), zap.String("path", cfg.configFile))
+		}
+		cfg = *c
+	}
 
 	if len(cfg.ServerAddress) == 0 {
 		cfg.ServerAddress = ":8080"
@@ -167,4 +178,15 @@ func prepareTLSFile(name string, data []byte) error {
 
 	_, err = file.Write(data)
 	return err
+}
+
+func loadConfigFromFile(filePath string) (*config, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var result config
+	err = json.Unmarshal(data, &result)
+	return &result, err
 }
