@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"go.uber.org/zap"
 
@@ -111,6 +113,11 @@ func main() {
 
 	server := &http.Server{Addr: cfg.ServerAddress, Handler: handler}
 
+	sCh, err := prepareShutdown(server, logger)
+	if err != nil {
+		logger.Fatal("failed to prepare shutdown", zap.Error(err))
+	}
+
 	if cfg.ServeTLS {
 		if err := prepareTLSFile(serverKeyFileName, serverKey); err != nil {
 			logger.Fatal("failed to create a key file", zap.Error(err))
@@ -123,9 +130,9 @@ func main() {
 		err = server.ListenAndServe()
 	}
 
-	if err != nil {
-		logger.Fatal("failed to create a storage", zap.Error(err))
-	}
+	<-sCh
+
+	fmt.Println("Server shutdown")
 }
 
 func createStorage(ctx context.Context, cfg *config) (storage.URLStorage, *sql.DB, error) {
@@ -189,4 +196,25 @@ func loadConfigFromFile(filePath string) (*config, error) {
 	var result config
 	err = json.Unmarshal(data, &result)
 	return &result, err
+}
+
+func prepareShutdown(server *http.Server, logger *zap.Logger) (<-chan any, error) {
+	shutdownSig := make(chan any)
+	signals := make(chan os.Signal, 1)
+
+	signal.Notify(signals, os.Interrupt)
+	signal.Notify(signals, os.Kill)
+	signal.Notify(signals, syscall.SIGQUIT)
+
+	go func() {
+		<-signals
+
+		if err := server.Shutdown(context.Background()); err != nil {
+			logger.Error("failed to shutdown a server", zap.Error(err))
+		}
+
+		close(shutdownSig)
+	}()
+
+	return shutdownSig, nil
 }
