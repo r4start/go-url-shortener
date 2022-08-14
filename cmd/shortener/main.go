@@ -202,8 +202,8 @@ func prepareShutdown(server *http.Server, logger *zap.Logger) (<-chan any, error
 	shutdownSig := make(chan any)
 	signals := make(chan os.Signal, 1)
 
-	signal.Notify(signals, os.Interrupt)
-	signal.Notify(signals, os.Kill)
+	signal.Notify(signals, syscall.SIGINT)
+	signal.Notify(signals, syscall.SIGTERM)
 	signal.Notify(signals, syscall.SIGQUIT)
 
 	go func() {
