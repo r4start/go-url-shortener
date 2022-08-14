@@ -203,8 +203,8 @@ func loadConfigFromFile(filePath string) (*config, error) {
 	return &result, err
 }
 
-func prepareShutdown(server *http.Server, logger *zap.Logger) (<-chan any, error) {
-	shutdownSig := make(chan any)
+func prepareShutdown(server *http.Server, logger *zap.Logger) (<-chan interface{}, error) {
+	shutdownSig := make(chan interface{})
 	signals := make(chan os.Signal, 1)
 
 	signal.Notify(signals, syscall.SIGINT)
