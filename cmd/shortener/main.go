@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -130,9 +131,13 @@ func main() {
 		err = server.ListenAndServe()
 	}
 
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Fatal("server stopped with an error", zap.Error(err))
+	}
+
 	<-sCh
 
-	fmt.Println("Server shutdown")
+	fmt.Println("Server stopped")
 }
 
 func createStorage(ctx context.Context, cfg *config) (storage.URLStorage, *sql.DB, error) {
