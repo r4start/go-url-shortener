@@ -4,10 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"go.uber.org/zap"
 
@@ -24,11 +28,24 @@ import (
 //go:embed *
 var buildInfo embed.FS
 
+//go:embed key.pem
+var serverKey []byte
+
+//go:embed cert.pem
+var serverCert []byte
+
+const (
+	serverKeyFileName  = "key.pem"
+	serverCertFileName = "cert.pem"
+)
+
 type config struct {
-	ServerAddress            string `env:"SERVER_ADDRESS" envDefault:":8080"`
-	BaseURL                  string `env:"BASE_URL"`
-	FileStoragePath          string `env:"FILE_STORAGE_PATH"`
-	DatabaseConnectionString string `env:"DATABASE_DSN"`
+	ServerAddress            string `json:"server_address" env:"SERVER_ADDRESS" envDefault:":8080"`
+	BaseURL                  string `json:"base_url" env:"BASE_URL"`
+	FileStoragePath          string `json:"file_storage_path" env:"FILE_STORAGE_PATH"`
+	DatabaseConnectionString string `json:"database_dsn" env:"DATABASE_DSN"`
+	ServeTLS                 bool   `json:"enable_https" env:"ENABLE_HTTPS"`
+	configFile               string
 }
 
 func main() {
@@ -40,6 +57,13 @@ func main() {
 	flag.StringVar(&cfg.BaseURL, "b", os.Getenv("BASE_URL"), "")
 	flag.StringVar(&cfg.FileStoragePath, "f", os.Getenv("FILE_STORAGE_PATH"), "")
 	flag.StringVar(&cfg.DatabaseConnectionString, "d", os.Getenv("DATABASE_DSN"), "")
+	flag.StringVar(&cfg.configFile, "c", os.Getenv("CONFIG"), "")
+
+	if _, exists := os.LookupEnv("ENABLE_HTTPS"); exists {
+		flag.BoolVar(&cfg.ServeTLS, "s", true, "")
+	} else {
+		flag.BoolVar(&cfg.ServeTLS, "s", false, "")
+	}
 
 	flag.Parse()
 
@@ -53,6 +77,14 @@ func main() {
 			fmt.Println(err)
 		}
 	}()
+
+	if len(cfg.configFile) != 0 {
+		c, err := loadConfigFromFile(cfg.configFile)
+		if err != nil {
+			logger.Fatal("failed to load config file", zap.Error(err), zap.String("path", cfg.configFile))
+		}
+		cfg = *c
+	}
 
 	if len(cfg.ServerAddress) == 0 {
 		cfg.ServerAddress = ":8080"
@@ -81,9 +113,31 @@ func main() {
 	}
 
 	server := &http.Server{Addr: cfg.ServerAddress, Handler: handler}
-	if err := server.ListenAndServe(); err != nil {
-		logger.Fatal("failed to create a storage", zap.Error(err))
+
+	sCh, err := prepareShutdown(server, logger)
+	if err != nil {
+		logger.Fatal("failed to prepare shutdown", zap.Error(err))
 	}
+
+	if cfg.ServeTLS {
+		if err := prepareTLSFile(serverKeyFileName, serverKey); err != nil {
+			logger.Fatal("failed to create a key file", zap.Error(err))
+		}
+		if err := prepareTLSFile(serverCertFileName, serverCert); err != nil {
+			logger.Fatal("failed to create a cert file", zap.Error(err))
+		}
+		err = server.ListenAndServeTLS(serverCertFileName, serverKeyFileName)
+	} else {
+		err = server.ListenAndServe()
+	}
+
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Fatal("server stopped with an error", zap.Error(err))
+	}
+
+	<-sCh
+
+	fmt.Println("Server stopped")
 }
 
 func createStorage(ctx context.Context, cfg *config) (storage.URLStorage, *sql.DB, error) {
@@ -125,4 +179,47 @@ func printStartupMessage() {
 	fmt.Printf("Build version: %s", buildVersion)
 	fmt.Printf("Build date: %s", buildDate)
 	fmt.Printf("Build commit: %s\n\n", buildCommit)
+}
+
+func prepareTLSFile(name string, data []byte) error {
+	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = file.Write(data)
+	return err
+}
+
+func loadConfigFromFile(filePath string) (*config, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var result config
+	err = json.Unmarshal(data, &result)
+	return &result, err
+}
+
+func prepareShutdown(server *http.Server, logger *zap.Logger) (<-chan interface{}, error) {
+	shutdownSig := make(chan interface{})
+	signals := make(chan os.Signal, 1)
+
+	signal.Notify(signals, syscall.SIGINT)
+	signal.Notify(signals, syscall.SIGTERM)
+	signal.Notify(signals, syscall.SIGQUIT)
+
+	go func() {
+		<-signals
+
+		if err := server.Shutdown(context.Background()); err != nil {
+			logger.Error("failed to shutdown a server", zap.Error(err))
+		}
+
+		close(shutdownSig)
+	}()
+
+	return shutdownSig, nil
 }
