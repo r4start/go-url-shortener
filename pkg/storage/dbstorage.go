@@ -44,6 +44,11 @@ const (
 	databaseDeleteQueueSize = 1000
 )
 
+var (
+	_ URLStorage  = (*dbStorage)(nil)
+	_ ServiceStat = (*dbStorage)(nil)
+)
+
 type dbRow struct {
 	ID      int64
 	URLHash int64
@@ -65,7 +70,7 @@ type dbStorage struct {
 }
 
 // NewDatabaseStorage creates URLStorage implementation that defines methods over PostgreSQL database.
-func NewDatabaseStorage(ctx context.Context, connection *sql.DB) (URLStorage, error) {
+func NewDatabaseStorage(ctx context.Context, connection *sql.DB) (*dbStorage, error) {
 	if err := connection.Ping(); err != nil {
 		return nil, err
 	}
@@ -213,6 +218,14 @@ func (s *dbStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData,
 	}
 
 	return data, nil
+}
+
+func (s *dbStorage) TotalUsers(ctx context.Context) (uint64, error) {
+	return 0, nil
+}
+
+func (s *dbStorage) TotalURLs(ctx context.Context) (uint64, error) {
+	return 0, nil
 }
 
 func (s *dbStorage) deleteURLs() {

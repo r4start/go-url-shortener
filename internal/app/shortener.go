@@ -50,6 +50,7 @@ type deleteData struct {
 type URLShortener struct {
 	*chi.Mux
 	urlStorage storage.URLStorage
+	stat       storage.ServiceStat
 	domain     string
 	gcm        cipher.AEAD
 	privateKey []byte
@@ -59,7 +60,7 @@ type URLShortener struct {
 	deleteChan chan deleteData
 }
 
-func NewURLShortener(ctx context.Context, db *sql.DB, domain string, st storage.URLStorage, logger *zap.Logger) (*URLShortener, error) {
+func NewURLShortener(ctx context.Context, db *sql.DB, domain string, st storage.URLStorage, stat storage.ServiceStat, logger *zap.Logger) (*URLShortener, error) {
 	privateKey := make([]byte, 32)
 	readBytes, err := rand.Read(privateKey)
 	if err != nil || readBytes != len(privateKey) {
@@ -78,6 +79,7 @@ func NewURLShortener(ctx context.Context, db *sql.DB, domain string, st storage.
 	handler := &URLShortener{
 		Mux:        chi.NewMux(),
 		urlStorage: st,
+		stat:       stat,
 		domain:     domain,
 		gcm:        aead,
 		privateKey: privateKey,
@@ -99,6 +101,8 @@ func NewURLShortener(ctx context.Context, db *sql.DB, domain string, st storage.
 	handler.Post("/", handler.shorten)
 	handler.Post("/api/shorten", handler.apiShortener)
 	handler.Post("/api/shorten/batch", handler.apiBatchShortener)
+
+	handler.Get("/api/internal/stats", handler.apiInternalStats)
 
 	handler.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "", http.StatusBadRequest)
@@ -353,6 +357,41 @@ func (h *URLShortener) ping(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (h *URLShortener) apiInternalStats(w http.ResponseWriter, r *http.Request) {
+	type response struct {
+		URLs  uint64 `json:"urls"`
+		Users uint64 `json:"users"`
+	}
+
+	resp := response{}
+
+	if h.stat != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
+		defer cancel()
+
+		urls, err := h.stat.TotalURLs(ctx)
+		if err != nil {
+			h.logger.Error("failed to get total urls", zap.Error(err))
+			http.Error(w, "", http.StatusInternalServerError)
+			return
+		}
+
+		users, err := h.stat.TotalUsers(ctx)
+		if err != nil {
+			h.logger.Error("failed to get total users", zap.Error(err))
+			http.Error(w, "", http.StatusInternalServerError)
+			return
+		}
+
+		resp = response{
+			URLs:  urls,
+			Users: users,
+		}
+	}
+
+	h.apiWriteResponse(w, nil /*apiRequestData*/, http.StatusOK, resp)
+}
+
 func (h *URLShortener) generateShortID(ctx context.Context, userID uint64, data string) ([]byte, bool, error) {
 	u, err := url.Parse(data)
 	if err != nil || len(u.Hostname()) == 0 {
@@ -517,7 +556,7 @@ func (h *URLShortener) apiWriteResponse(w http.ResponseWriter, reqData *apiReque
 		return
 	}
 
-	if reqData.IsIDGenerated {
+	if reqData != nil && reqData.IsIDGenerated {
 		if err := h.setUserID(w, reqData.UserID); err != nil {
 			h.logger.Error("failed to set user id", zap.Error(err))
 			http.Error(w, "", http.StatusInternalServerError)

@@ -93,7 +93,7 @@ func main() {
 	storageContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	st, dbConn, err := createStorage(storageContext, &cfg)
+	st, stat, dbConn, err := createStorage(storageContext, &cfg)
 	if err != nil {
 		logger.Fatal("failed to create a storage", zap.Error(err))
 	}
@@ -107,7 +107,7 @@ func main() {
 	serverContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	handler, err := app.NewURLShortener(serverContext, dbConn, cfg.BaseURL, st, logger)
+	handler, err := app.NewURLShortener(serverContext, dbConn, cfg.BaseURL, st, stat, logger)
 	if err != nil {
 		logger.Fatal("failed to create a storage", zap.Error(err))
 	}
@@ -140,15 +140,21 @@ func main() {
 	fmt.Println("Server stopped")
 }
 
-func createStorage(ctx context.Context, cfg *config) (storage.URLStorage, *sql.DB, error) {
+func createStorage(ctx context.Context, cfg *config) (storage.URLStorage, storage.ServiceStat, *sql.DB, error) {
 	var st storage.URLStorage = nil
+	var stat storage.ServiceStat = nil
 	var dbConn *sql.DB = nil
 	var err error = nil
 
 	if len(cfg.DatabaseConnectionString) != 0 {
 		dbConn, err = sql.Open("pgx", cfg.DatabaseConnectionString)
 		if err == nil {
-			st, err = storage.NewDatabaseStorage(ctx, dbConn)
+			ds, err := storage.NewDatabaseStorage(ctx, dbConn)
+			if err != nil {
+				return nil, nil, dbConn, err
+			}
+			st = ds
+			stat = ds
 		}
 	} else if len(cfg.FileStoragePath) != 0 {
 		st, err = storage.NewFileStorage(cfg.FileStoragePath)
@@ -156,7 +162,7 @@ func createStorage(ctx context.Context, cfg *config) (storage.URLStorage, *sql.D
 		st = storage.NewInMemoryStorage()
 	}
 
-	return st, dbConn, err
+	return st, stat, dbConn, err
 }
 
 func printStartupMessage() {
