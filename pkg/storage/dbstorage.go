@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -34,9 +35,14 @@ const (
 
 	deleteFeed = `update feeds set flags = 'disabled' where user_id = %d and url_hash in (%s);`
 
-	getFeed = `select url, flags from feeds where url_hash = $1;`
+	getFeed             = `select url, flags from feeds where url_hash = $1;`
+	getActiveFeedsCount = `select count(flags=$1) from feeds;`
 
 	getUserData = `select url_hash, url from feeds where user_id = $1 and flags = 'active';`
+
+	// Plain 'select count(distinct user_id)' is slower than this query.
+	// https://stackoverflow.com/questions/11250253/postgresql-countdistinct-very-slow
+	getActiveUsersCount = `select count(*) from (select distinct user_id from feeds where flags=$1) as temp;`
 
 	checkFeedsTable = `select count(*) from feeds;`
 
@@ -221,11 +227,21 @@ func (s *dbStorage) GetUserData(ctx context.Context, userID uint64) ([]UserData,
 }
 
 func (s *dbStorage) TotalUsers(ctx context.Context) (uint64, error) {
-	return 0, nil
+	count := uint64(0)
+	err := s.dbConn.QueryRowContext(ctx, getActiveUsersCount, stateActive).Scan(&count)
+	if errors.Is(err, sql.ErrNoRows) {
+		return count, nil
+	}
+	return count, err
 }
 
 func (s *dbStorage) TotalURLs(ctx context.Context) (uint64, error) {
-	return 0, nil
+	count := uint64(0)
+	err := s.dbConn.QueryRowContext(ctx, getActiveFeedsCount, stateActive).Scan(&count)
+	if errors.Is(err, sql.ErrNoRows) {
+		return count, nil
+	}
+	return count, err
 }
 
 func (s *dbStorage) deleteURLs() {
