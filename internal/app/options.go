@@ -7,34 +7,36 @@ import (
 	"github.com/r4start/go-url-shortener/pkg/storage"
 )
 
-type Configurator func(s *URLShortener)
+type HTTPServerConfigurator func(s *HTTPServer)
 
-func WithDomain(domain string) Configurator {
-	return func(s *URLShortener) {
+func WithDomain(domain string) HTTPServerConfigurator {
+	return func(s *HTTPServer) {
 		s.domain = domain
 	}
 }
 
-func WithStorage(st storage.URLStorage) Configurator {
+func WithTrustedNetwork(network *net.IPNet) HTTPServerConfigurator {
+	return func(s *HTTPServer) {
+		s.trustedNet = network
+	}
+}
+
+type ShortenerConfigurator func(s *URLShortener)
+
+func WithStorage(st storage.URLStorage) ShortenerConfigurator {
 	return func(s *URLShortener) {
 		s.urlStorage = st
 	}
 }
 
-func WithStat(stat storage.ServiceStat) Configurator {
+func WithStat(stat storage.ServiceStat) ShortenerConfigurator {
 	return func(s *URLShortener) {
 		s.stat = stat
 	}
 }
 
-func WithDatabase(c *sql.DB) Configurator {
+func WithDatabase(c *sql.DB) ShortenerConfigurator {
 	return func(s *URLShortener) {
 		s.db = c
-	}
-}
-
-func WithTrustedNetwork(network *net.IPNet) Configurator {
-	return func(s *URLShortener) {
-		s.trustedNet = network
 	}
 }

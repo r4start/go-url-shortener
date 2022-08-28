@@ -118,13 +118,19 @@ func main() {
 	serverContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	handler, err := app.NewURLShortener(serverContext, logger, app.WithDatabase(dbConn),
-		app.WithDomain(cfg.BaseURL), app.WithStorage(st), app.WithStat(stat), app.WithTrustedNetwork(trustedNetwork))
+	shortener, err := app.NewURLShortener(serverContext, logger,
+		app.WithDatabase(dbConn), app.WithStorage(st), app.WithStat(stat))
 	if err != nil {
-		logger.Fatal("failed to create a storage", zap.Error(err))
+		logger.Fatal("failed to create shortener", zap.Error(err))
 	}
 
-	server := &http.Server{Addr: cfg.ServerAddress, Handler: handler}
+	httpHandler, err := app.NewHTTPServer(shortener, logger,
+		app.WithDomain(cfg.BaseURL), app.WithTrustedNetwork(trustedNetwork))
+	if err != nil {
+		logger.Fatal("failed to create http server", zap.Error(err))
+	}
+
+	server := &http.Server{Addr: cfg.ServerAddress, Handler: httpHandler}
 
 	sCh, err := prepareShutdown(server, logger)
 	if err != nil {

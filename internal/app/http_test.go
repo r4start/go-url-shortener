@@ -24,10 +24,14 @@ type batchShortenRequest struct {
 	OriginalURL   string `json:"original_url"`
 }
 
-func testShortener(t *testing.T) *URLShortener {
+func testShortener(t *testing.T) *HTTPServer {
 	logger, _ := zap.NewDevelopment()
-	h, err := NewURLShortener(context.Background(), nil, "", storage.NewInMemoryStorage(), logger)
+	s, err := NewURLShortener(context.Background(), logger, WithStorage(storage.NewInMemoryStorage()))
 	assert.Nil(t, err)
+
+	h, err := NewHTTPServer(s, logger)
+	assert.Nil(t, err)
+
 	return h
 }
 
@@ -542,9 +546,11 @@ func Test_batchDecodeIDs(t *testing.T) {
 	}
 }
 
-func benchShortener() *URLShortener {
+func benchShortener() *HTTPServer {
 	logger, _ := zap.NewDevelopment()
-	h, _ := NewURLShortener(context.Background(), nil, "", storage.NewInMemoryStorage(), logger)
+	s, _ := NewURLShortener(context.Background(), logger, WithStorage(storage.NewInMemoryStorage()))
+
+	h, _ := NewHTTPServer(s, logger)
 	return h
 }
 
