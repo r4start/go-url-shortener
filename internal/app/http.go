@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/r4start/go-url-shortener/pkg/storage"
 	"go.uber.org/zap"
 )
 
@@ -114,7 +115,10 @@ func (h *HTTPServer) getURL(w http.ResponseWriter, r *http.Request) {
 	keyData := chi.URLParam(r, "id")
 
 	u, err := h.shortener.OriginalURL(r.Context(), keyData)
-	if err != nil {
+	if err == storage.ErrDeleted {
+		w.WriteHeader(http.StatusGone)
+		return
+	} else if err != nil {
 		h.logger.Error("failed to get original url", zap.Error(err))
 		http.Error(w, "", http.StatusNotFound)
 		return
