@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -58,9 +59,10 @@ type URLShortener struct {
 	logger     *zap.Logger
 	deleteCtx  context.Context
 	deleteChan chan deleteData
+	trustedNet *net.IPNet
 }
 
-func NewURLShortener(ctx context.Context, db *sql.DB, domain string, st storage.URLStorage, stat storage.ServiceStat, logger *zap.Logger) (*URLShortener, error) {
+func NewURLShortener(ctx context.Context, logger *zap.Logger, opts ...Configurator) (*URLShortener, error) {
 	privateKey := make([]byte, 32)
 	readBytes, err := rand.Read(privateKey)
 	if err != nil || readBytes != len(privateKey) {
@@ -78,15 +80,15 @@ func NewURLShortener(ctx context.Context, db *sql.DB, domain string, st storage.
 
 	handler := &URLShortener{
 		Mux:        chi.NewMux(),
-		urlStorage: st,
-		stat:       stat,
-		domain:     domain,
 		gcm:        aead,
 		privateKey: privateKey,
-		db:         db,
 		logger:     logger,
 		deleteCtx:  ctx,
 		deleteChan: make(chan deleteData),
+	}
+
+	for _, o := range opts {
+		o(handler)
 	}
 
 	handler.Use(DecompressGzip)
@@ -361,6 +363,13 @@ func (h *URLShortener) apiInternalStats(w http.ResponseWriter, r *http.Request) 
 	type response struct {
 		URLs  uint64 `json:"urls"`
 		Users uint64 `json:"users"`
+	}
+
+	realIP := r.Header.Get("x-real-ip")
+	userIP := net.ParseIP(realIP)
+	if userIP == nil || h.trustedNet == nil || !h.trustedNet.Contains(userIP) {
+		http.Error(w, "", http.StatusForbidden)
+		return
 	}
 
 	resp := response{}

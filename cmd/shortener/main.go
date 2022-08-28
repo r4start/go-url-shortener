@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -40,11 +41,12 @@ const (
 )
 
 type config struct {
-	ServerAddress            string `json:"server_address" env:"SERVER_ADDRESS" envDefault:":8080"`
-	BaseURL                  string `json:"base_url" env:"BASE_URL"`
-	FileStoragePath          string `json:"file_storage_path" env:"FILE_STORAGE_PATH"`
-	DatabaseConnectionString string `json:"database_dsn" env:"DATABASE_DSN"`
-	ServeTLS                 bool   `json:"enable_https" env:"ENABLE_HTTPS"`
+	ServerAddress            string `json:"server_address"`
+	BaseURL                  string `json:"base_url"`
+	FileStoragePath          string `json:"file_storage_path"`
+	DatabaseConnectionString string `json:"database_dsn"`
+	ServeTLS                 bool   `json:"enable_https"`
+	TrustedSubnet            string `json:"trusted_subnet"`
 	configFile               string
 }
 
@@ -58,6 +60,7 @@ func main() {
 	flag.StringVar(&cfg.FileStoragePath, "f", os.Getenv("FILE_STORAGE_PATH"), "")
 	flag.StringVar(&cfg.DatabaseConnectionString, "d", os.Getenv("DATABASE_DSN"), "")
 	flag.StringVar(&cfg.configFile, "c", os.Getenv("CONFIG"), "")
+	flag.StringVar(&cfg.TrustedSubnet, "t", os.Getenv("TRUSTED_SUBNET"), "")
 
 	if _, exists := os.LookupEnv("ENABLE_HTTPS"); exists {
 		flag.BoolVar(&cfg.ServeTLS, "s", true, "")
@@ -90,6 +93,14 @@ func main() {
 		cfg.ServerAddress = ":8080"
 	}
 
+	var trustedNetwork *net.IPNet = nil
+	if len(cfg.TrustedSubnet) != 0 {
+		_, trustedNetwork, err = net.ParseCIDR(cfg.TrustedSubnet)
+		if err != nil {
+			logger.Fatal("failed to parse trusted subnet", zap.Error(err))
+		}
+	}
+
 	storageContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -107,7 +118,8 @@ func main() {
 	serverContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	handler, err := app.NewURLShortener(serverContext, dbConn, cfg.BaseURL, st, stat, logger)
+	handler, err := app.NewURLShortener(serverContext, logger, app.WithDatabase(dbConn),
+		app.WithDomain(cfg.BaseURL), app.WithStorage(st), app.WithStat(stat), app.WithTrustedNetwork(trustedNetwork))
 	if err != nil {
 		logger.Fatal("failed to create a storage", zap.Error(err))
 	}
