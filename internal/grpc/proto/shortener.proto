@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package internal.grpc;
+
+option go_package = "internal/grpc";
+
+service UrlShortener {
+  rpc Shorten(ShortenerRequest) returns (ShortenerResponse);
+  rpc BatchShorten(BatchRequest) returns (BatchResponse);
+
+  rpc GetURL(ShortenerRequest) returns (ShortenerResponse);
+
+  rpc ListUserUrls(ListUserUrlsRequest) returns (ListUserUrlsResponse);
+
+  rpc DeleteUserUrls(DeleteUserUrlsRequest) returns (DeleteUserUrlsResponse);
+
+  rpc Stat(StatRequest) returns (StatResponse);
+}
+
+message ShortenerRequest {
+  string url = 1;
+  optional string user_id = 2;
+}
+
+message ShortenerResponse {
+  string url = 1;
+  optional string user_id = 2;
+}
+
+message BatchRequest {
+  message UrlData {
+    uint64 correlation_id = 1;
+    string url = 2;
+  }
+
+  repeated UrlData urls = 1;
+  optional string user_id = 2;
+}
+
+message BatchResponse {
+  message Result {
+    uint64 correlation_id = 1;
+    string key = 2;
+  }
+
+  repeated Result keys = 1;
+  optional string user_id = 2;
+}
+
+message ListUserUrlsRequest {
+  string user_id = 1;
+}
+
+message ListUserUrlsResponse {
+  message Result {
+    string short_url = 1;
+    string original_url = 2;
+  }
+
+  repeated Result urls = 1;
+}
+
+message DeleteUserUrlsRequest {
+  string user_id = 1;
+  repeated string urls = 2;
+}
+
+message DeleteUserUrlsResponse {}
+
+message StatRequest {}
+
+message StatResponse {
+  uint64 urls = 1;
+  uint64 users = 2;
+}

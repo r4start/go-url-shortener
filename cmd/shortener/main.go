@@ -14,11 +14,16 @@ import (
 	"os/signal"
 	"syscall"
 
+	pb "github.com/r4start/go-url-shortener/internal/grpc/proto"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
 	_ "github.com/jackc/pgx/v4/stdlib"
 
 	"github.com/r4start/go-url-shortener/internal/app"
+	grpc_srv "github.com/r4start/go-url-shortener/internal/grpc"
 	"github.com/r4start/go-url-shortener/pkg/storage"
 )
 
@@ -42,6 +47,7 @@ const (
 
 type config struct {
 	ServerAddress            string `json:"server_address"`
+	GrpcServerAddress        string `json:"grpc_server_address"`
 	BaseURL                  string `json:"base_url"`
 	FileStoragePath          string `json:"file_storage_path"`
 	DatabaseConnectionString string `json:"database_dsn"`
@@ -56,6 +62,7 @@ func main() {
 	cfg := config{}
 
 	flag.StringVar(&cfg.ServerAddress, "a", os.Getenv("SERVER_ADDRESS"), "")
+	flag.StringVar(&cfg.GrpcServerAddress, "ga", os.Getenv("GRPC_SERVER_ADDRESS"), "")
 	flag.StringVar(&cfg.BaseURL, "b", os.Getenv("BASE_URL"), "")
 	flag.StringVar(&cfg.FileStoragePath, "f", os.Getenv("FILE_STORAGE_PATH"), "")
 	flag.StringVar(&cfg.DatabaseConnectionString, "d", os.Getenv("DATABASE_DSN"), "")
@@ -93,6 +100,10 @@ func main() {
 		cfg.ServerAddress = ":8080"
 	}
 
+	if len(cfg.GrpcServerAddress) == 0 {
+		cfg.GrpcServerAddress = ":8180"
+	}
+
 	var trustedNetwork *net.IPNet = nil
 	if len(cfg.TrustedSubnet) != 0 {
 		_, trustedNetwork, err = net.ParseCIDR(cfg.TrustedSubnet)
@@ -124,6 +135,41 @@ func main() {
 		logger.Fatal("failed to create shortener", zap.Error(err))
 	}
 
+	if cfg.ServeTLS {
+		if err := prepareTLSFile(serverKeyFileName, serverKey); err != nil {
+			logger.Fatal("failed to create a key file", zap.Error(err))
+		}
+		if err := prepareTLSFile(serverCertFileName, serverCert); err != nil {
+			logger.Fatal("failed to create a cert file", zap.Error(err))
+		}
+	}
+
+	grpcShortener := grpc_srv.NewServer(shortener, "", trustedNetwork, logger)
+
+	var creds credentials.TransportCredentials
+	if cfg.ServeTLS {
+		creds, err = credentials.NewServerTLSFromFile(serverCertFileName, serverKeyFileName)
+		if err != nil {
+			logger.Fatal("failed to prepare grpc transport creds", zap.Error(err))
+		}
+	} else {
+		creds = insecure.NewCredentials()
+	}
+
+	grpcServer := grpc.NewServer(grpc.Creds(creds))
+	pb.RegisterUrlShortenerServer(grpcServer, grpcShortener)
+
+	go func() {
+		listener, err := net.Listen("tcp", cfg.GrpcServerAddress)
+		if err != nil {
+			logger.Fatal("failed to start grpc listener", zap.Error(err))
+		}
+
+		if err := grpcServer.Serve(listener); err != nil {
+			logger.Fatal("failed to serve grpc", zap.Error(err))
+		}
+	}()
+
 	httpHandler, err := app.NewHTTPServer(shortener, logger,
 		app.WithDomain(cfg.BaseURL), app.WithTrustedNetwork(trustedNetwork))
 	if err != nil {
@@ -132,18 +178,12 @@ func main() {
 
 	server := &http.Server{Addr: cfg.ServerAddress, Handler: httpHandler}
 
-	sCh, err := prepareShutdown(server, logger)
+	sCh, err := prepareShutdown(server, grpcServer, logger)
 	if err != nil {
 		logger.Fatal("failed to prepare shutdown", zap.Error(err))
 	}
 
 	if cfg.ServeTLS {
-		if err := prepareTLSFile(serverKeyFileName, serverKey); err != nil {
-			logger.Fatal("failed to create a key file", zap.Error(err))
-		}
-		if err := prepareTLSFile(serverCertFileName, serverCert); err != nil {
-			logger.Fatal("failed to create a cert file", zap.Error(err))
-		}
 		err = server.ListenAndServeTLS(serverCertFileName, serverKeyFileName)
 	} else {
 		err = server.ListenAndServe()
@@ -227,7 +267,7 @@ func loadConfigFromFile(filePath string) (*config, error) {
 	return &result, err
 }
 
-func prepareShutdown(server *http.Server, logger *zap.Logger) (<-chan interface{}, error) {
+func prepareShutdown(server *http.Server, grpcServer *grpc.Server, logger *zap.Logger) (<-chan interface{}, error) {
 	shutdownSig := make(chan interface{})
 	signals := make(chan os.Signal, 1)
 
@@ -241,6 +281,8 @@ func prepareShutdown(server *http.Server, logger *zap.Logger) (<-chan interface{
 		if err := server.Shutdown(context.Background()); err != nil {
 			logger.Error("failed to shutdown a server", zap.Error(err))
 		}
+
+		grpcServer.GracefulStop()
 
 		close(shutdownSig)
 	}()

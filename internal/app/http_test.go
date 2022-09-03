@@ -24,7 +24,7 @@ type batchShortenRequest struct {
 	OriginalURL   string `json:"original_url"`
 }
 
-func testShortener(t *testing.T) *HTTPServer {
+func testServer(t *testing.T) *HTTPServer {
 	logger, _ := zap.NewDevelopment()
 	s, err := NewURLShortener(context.Background(), logger, WithStorage(storage.NewInMemoryStorage()))
 	assert.Nil(t, err)
@@ -55,7 +55,7 @@ func TestURLShortener_ServeHTTP(t *testing.T) {
 		},
 	}
 
-	h := testShortener(t)
+	h := testServer(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h.ServeHTTP(tt.args.w, tt.args.r)
@@ -86,7 +86,7 @@ func TestURLShortener_getURL(t *testing.T) {
 		},
 	}
 
-	h := testShortener(t)
+	h := testServer(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
@@ -187,7 +187,7 @@ func TestURLShortener_shorten(t *testing.T) {
 		},
 	}
 
-	h := testShortener(t)
+	h := testServer(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h.ServeHTTP(tt.args.w, tt.args.r)
@@ -278,7 +278,7 @@ func TestURLShortener_apiShortener(t *testing.T) {
 		},
 	}
 
-	h := testShortener(t)
+	h := testServer(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.args.r.Header.Set("content-type", "application/json")
@@ -342,7 +342,7 @@ func TestURLShortener_apiBatchShortener(t *testing.T) {
 		},
 	}
 
-	h := testShortener(t)
+	h := testServer(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			requests := make([]batchShortenRequest, 0, len(tt.args.URLs))
@@ -427,7 +427,7 @@ func TestURLShortener_apiUserURLs(t *testing.T) {
 		},
 	}
 
-	h := testShortener(t)
+	h := testServer(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			requests := make([]batchShortenRequest, 0, len(tt.args.URLs))
@@ -546,7 +546,7 @@ func Test_batchDecodeIDs(t *testing.T) {
 	}
 }
 
-func benchShortener() *HTTPServer {
+func benchServer() *HTTPServer {
 	logger, _ := zap.NewDevelopment()
 	s, _ := NewURLShortener(context.Background(), logger, WithStorage(storage.NewInMemoryStorage()))
 
@@ -557,7 +557,7 @@ func benchShortener() *HTTPServer {
 func BenchmarkURLShortener_shorten(b *testing.B) {
 	b.StopTimer()
 
-	shortener := benchShortener()
+	shortener := benchServer()
 
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
@@ -571,7 +571,7 @@ func BenchmarkURLShortener_shorten(b *testing.B) {
 
 func BenchmarkURLShortener_getURL(b *testing.B) {
 	b.StopTimer()
-	shortener := benchShortener()
+	shortener := benchServer()
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://ya.ru"))
@@ -606,7 +606,7 @@ func BenchmarkURLShortener_getURL(b *testing.B) {
 }
 
 func BenchmarkURLShortener_apiShortener(b *testing.B) {
-	shortener := benchShortener()
+	shortener := benchServer()
 
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
@@ -621,7 +621,7 @@ func BenchmarkURLShortener_apiShortener(b *testing.B) {
 
 func BenchmarkURLShortener_apiBatchShortener(b *testing.B) {
 	b.StopTimer()
-	shortener := benchShortener()
+	shortener := benchServer()
 	urls := []string{
 		"http://ya.ru",
 		"http://vc.ru",
@@ -657,7 +657,7 @@ func BenchmarkURLShortener_apiBatchShortener(b *testing.B) {
 
 func BenchmarkURLShortener_apiUserURLs(b *testing.B) {
 	b.StopTimer()
-	h := benchShortener()
+	h := benchServer()
 
 	urls := []string{
 		"http://ya.ru",
