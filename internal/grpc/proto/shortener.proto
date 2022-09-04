@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package internal.grpc;
+package shortener;
 
 option go_package = "internal/grpc";
 

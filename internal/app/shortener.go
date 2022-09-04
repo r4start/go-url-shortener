@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	StorageOperationTimeout = time.Second
+	StorageOperationTimeout = 1800 * time.Second
 
 	UnlimitedWorkers     = -1
 	MaxWorkersPerRequest = 5
@@ -85,11 +85,11 @@ func NewURLShortener(ctx context.Context, logger *zap.Logger, opts ...ShortenerC
 	return handler, nil
 }
 
-func (h *URLShortener) Shorten(ctx context.Context, userID uint64, url string) (*ShortenResult, error) {
+func (u *URLShortener) Shorten(ctx context.Context, userID uint64, url string) (*ShortenResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, StorageOperationTimeout)
 	defer cancel()
 
-	dst, exists, err := h.generateShortID(ctx, userID, url)
+	dst, exists, err := u.generateShortID(ctx, userID, url)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (h *URLShortener) Shorten(ctx context.Context, userID uint64, url string) (
 	}, nil
 }
 
-func (h *URLShortener) OriginalURL(ctx context.Context, urlID string) (string, error) {
+func (u *URLShortener) OriginalURL(ctx context.Context, urlID string) (string, error) {
 	key, err := decodeID(urlID)
 	if err != nil {
 		return "", err
@@ -109,55 +109,55 @@ func (h *URLShortener) OriginalURL(ctx context.Context, urlID string) (string, e
 	ctx, cancel := context.WithTimeout(ctx, StorageOperationTimeout)
 	defer cancel()
 
-	return h.urlStorage.Get(ctx, key)
+	return u.urlStorage.Get(ctx, key)
 }
 
-func (h *URLShortener) BatchShorten(ctx context.Context, userID uint64, urls []string) ([][]byte, error) {
+func (u *URLShortener) BatchShorten(ctx context.Context, userID uint64, urls []string) ([][]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, StorageOperationTimeout)
 	defer cancel()
 
-	return h.generateShortIDs(ctx, userID, urls)
+	return u.generateShortIDs(ctx, userID, urls)
 }
 
-func (h *URLShortener) UserURLs(ctx context.Context, userID uint64) ([]storage.UserData, error) {
+func (u *URLShortener) UserURLs(ctx context.Context, userID uint64) ([]storage.UserData, error) {
 	ctx, cancel := context.WithTimeout(ctx, StorageOperationTimeout)
 	defer cancel()
-	return h.urlStorage.GetUserData(ctx, userID)
+	return u.urlStorage.GetUserData(ctx, userID)
 }
 
-func (h *URLShortener) DeleteUserURLs(_ context.Context, userID uint64, ids []string) error {
-	h.deleteChan <- deleteData{
+func (u *URLShortener) DeleteUserURLs(_ context.Context, userID uint64, ids []string) error {
+	u.deleteChan <- deleteData{
 		UserID: userID,
 		IDs:    ids,
 	}
 	return nil
 }
 
-func (h *URLShortener) Ping(ctx context.Context) error {
-	if h.db == nil {
+func (u *URLShortener) Ping(ctx context.Context) error {
+	if u.db == nil {
 		return fmt.Errorf("no db configured")
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, StorageOperationTimeout)
 	defer cancel()
 
-	return h.db.PingContext(ctx)
+	return u.db.PingContext(ctx)
 }
 
-func (h *URLShortener) Stat(ctx context.Context) (*ShortenerStats, error) {
-	if h.stat != nil {
+func (u *URLShortener) Stat(ctx context.Context) (*ShortenerStats, error) {
+	if u.stat == nil {
 		return &ShortenerStats{}, nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, StorageOperationTimeout)
 	defer cancel()
 
-	urls, err := h.stat.TotalURLs(ctx)
+	urls, err := u.stat.TotalURLs(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	users, err := h.stat.TotalUsers(ctx)
+	users, err := u.stat.TotalUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -168,21 +168,21 @@ func (h *URLShortener) Stat(ctx context.Context) (*ShortenerStats, error) {
 	}, nil
 }
 
-func (h *URLShortener) generateShortID(ctx context.Context, userID uint64, data string) ([]byte, bool, error) {
-	u, err := url.Parse(data)
-	if err != nil || len(u.Hostname()) == 0 {
+func (u *URLShortener) generateShortID(ctx context.Context, userID uint64, data string) ([]byte, bool, error) {
+	parsedURL, err := url.Parse(data)
+	if err != nil || len(parsedURL.Hostname()) == 0 {
 		return nil, false, errors.New("bad input data")
 	}
 
-	key, exists, err := h.urlStorage.Add(ctx, userID, u.String())
+	key, exists, err := u.urlStorage.Add(ctx, userID, parsedURL.String())
 	if err != nil {
 		return nil, false, err
 	}
 
-	return encodeID(key), exists, nil
+	return EncodeID(key), exists, nil
 }
 
-func (h *URLShortener) generateShortIDs(ctx context.Context, userID uint64, urls []string) ([][]byte, error) {
+func (u *URLShortener) generateShortIDs(ctx context.Context, userID uint64, urls []string) ([][]byte, error) {
 	for _, data := range urls {
 		u, err := url.Parse(data)
 		if err != nil || len(u.Hostname()) == 0 {
@@ -190,20 +190,20 @@ func (h *URLShortener) generateShortIDs(ctx context.Context, userID uint64, urls
 		}
 	}
 
-	results, err := h.urlStorage.AddURLs(ctx, userID, urls)
+	results, err := u.urlStorage.AddURLs(ctx, userID, urls)
 	if err != nil {
 		return nil, err
 	}
 
 	ids := make([][]byte, 0)
 	for _, key := range results {
-		ids = append(ids, encodeID(key.ID))
+		ids = append(ids, EncodeID(key.ID))
 	}
 
 	return ids, nil
 }
 
-func (h *URLShortener) GetUserID(rawValue *string) (uint64, bool, error) {
+func (u *URLShortener) GetUserID(rawValue *string) (uint64, bool, error) {
 	if rawValue == nil {
 		id, err := cryptoRandUint64()
 		if err != nil {
@@ -218,15 +218,15 @@ func (h *URLShortener) GetUserID(rawValue *string) (uint64, bool, error) {
 		return 0, false, err
 	}
 
-	hasher := hmac.New(sha256.New, h.privateKey)
+	hasher := hmac.New(sha256.New, u.privateKey)
 
-	if len(data) < h.gcm.NonceSize()+hasher.Size()+1 {
+	if len(data) < u.gcm.NonceSize()+hasher.Size()+1 {
 		return 0, false, errors.New("data size is too small")
 	}
 
 	sign := data[:hasher.Size()]
-	nonce := data[hasher.Size() : hasher.Size()+h.gcm.NonceSize()]
-	text := data[hasher.Size()+h.gcm.NonceSize():]
+	nonce := data[hasher.Size() : hasher.Size()+u.gcm.NonceSize()]
+	text := data[hasher.Size()+u.gcm.NonceSize():]
 
 	hasher.Write(data[hasher.Size():])
 	msgSign := hasher.Sum(nil)
@@ -240,7 +240,7 @@ func (h *URLShortener) GetUserID(rawValue *string) (uint64, bool, error) {
 	}
 
 	var rawID []byte
-	uid, err := h.gcm.Open(rawID, nonce, text, nil)
+	uid, err := u.gcm.Open(rawID, nonce, text, nil)
 	if err != nil {
 		return 0, false, err
 	}
@@ -248,8 +248,8 @@ func (h *URLShortener) GetUserID(rawValue *string) (uint64, bool, error) {
 	return binary.BigEndian.Uint64(uid[:binary.MaxVarintLen64]), false, nil
 }
 
-func (h *URLShortener) GenerateUserID(userID uint64) (*string, error) {
-	nonce := make([]byte, h.gcm.NonceSize())
+func (u *URLShortener) GenerateUserID(userID uint64) (*string, error) {
+	nonce := make([]byte, u.gcm.NonceSize())
 
 	readBytes, err := rand.Read(nonce)
 	if err != nil {
@@ -264,10 +264,10 @@ func (h *URLShortener) GenerateUserID(userID uint64) (*string, error) {
 	binary.BigEndian.PutUint64(text, userID)
 
 	var dst []byte
-	cipherText := h.gcm.Seal(dst, nonce, text, nil)
+	cipherText := u.gcm.Seal(dst, nonce, text, nil)
 	cipherText = append(nonce, cipherText...)
 
-	hasher := hmac.New(sha256.New, h.privateKey)
+	hasher := hmac.New(sha256.New, u.privateKey)
 	hasher.Write(cipherText)
 	sum := hasher.Sum(nil)
 
@@ -277,26 +277,26 @@ func (h *URLShortener) GenerateUserID(userID uint64) (*string, error) {
 	return &result, nil
 }
 
-func (h *URLShortener) deleteIDs() {
+func (u *URLShortener) deleteIDs() {
 	for {
 		select {
-		case <-h.deleteCtx.Done():
+		case <-u.deleteCtx.Done():
 			return
-		case data := <-h.deleteChan:
-			decodedIDs, err := batchDecodeIDs(h.deleteCtx, data.IDs, MaxWorkersPerRequest)
+		case data := <-u.deleteChan:
+			decodedIDs, err := batchDecodeIDs(u.deleteCtx, data.IDs, MaxWorkersPerRequest)
 			if err != nil {
-				h.logger.Error("failed to decode short ids", zap.Error(err))
+				u.logger.Error("failed to decode short ids", zap.Error(err))
 				continue
 			}
 
-			if err := h.urlStorage.DeleteURLs(h.deleteCtx, data.UserID, decodedIDs); err != nil {
-				h.logger.Error("failed to delete urls", zap.Error(err))
+			if err := u.urlStorage.DeleteURLs(u.deleteCtx, data.UserID, decodedIDs); err != nil {
+				u.logger.Error("failed to delete urls", zap.Error(err))
 			}
 		}
 	}
 }
 
-func encodeID(id uint64) []byte {
+func EncodeID(id uint64) []byte {
 	keyData := []byte(strconv.FormatUint(id, 16))
 	dst := make([]byte, base64.RawURLEncoding.EncodedLen(len(keyData)))
 	base64.RawURLEncoding.Encode(dst, keyData)

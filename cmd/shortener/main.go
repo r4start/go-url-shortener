@@ -144,7 +144,8 @@ func main() {
 		}
 	}
 
-	grpcShortener := grpc_srv.NewServer(shortener, "", trustedNetwork, logger)
+	grpcShortener := grpc_srv.NewServer(shortener, "", logger,
+		grpc_srv.DefaultStatAuth(trustedNetwork))
 
 	var creds credentials.TransportCredentials
 	if cfg.ServeTLS {

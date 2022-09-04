@@ -5,6 +5,11 @@ import (
 	"sync"
 )
 
+var (
+	_ URLStorage  = (*syncMapStorage)(nil)
+	_ ServiceStat = (*syncMapStorage)(nil)
+)
+
 type syncMapStorage struct {
 	urls     map[uint64]string
 	userData map[uint64][]UserData
@@ -13,7 +18,7 @@ type syncMapStorage struct {
 }
 
 // NewInMemoryStorage creates URLStorage implementation that doesn't have any persistent storage.
-func NewInMemoryStorage() URLStorage {
+func NewInMemoryStorage() *syncMapStorage {
 	return &syncMapStorage{
 		urls:     make(map[uint64]string),
 		userData: make(map[uint64][]UserData),
@@ -175,4 +180,16 @@ func (s *syncMapStorage) GetUserData(ctx context.Context, userID uint64) ([]User
 
 func (s *syncMapStorage) Close() error {
 	return nil
+}
+
+func (s *syncMapStorage) TotalUsers(context.Context) (uint64, error) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	return uint64(len(s.userData)), nil
+}
+
+func (s *syncMapStorage) TotalURLs(context.Context) (uint64, error) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	return uint64(len(s.urls) - len(s.goneIds)), nil
 }

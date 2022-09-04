@@ -40,7 +40,7 @@ func NewUrlShortenerClient(cc grpc.ClientConnInterface) UrlShortenerClient {
 
 func (c *urlShortenerClient) Shorten(ctx context.Context, in *ShortenerRequest, opts ...grpc.CallOption) (*ShortenerResponse, error) {
 	out := new(ShortenerResponse)
-	err := c.cc.Invoke(ctx, "/internal.grpc.UrlShortener/Shorten", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/shortener.UrlShortener/Shorten", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +49,7 @@ func (c *urlShortenerClient) Shorten(ctx context.Context, in *ShortenerRequest, 
 
 func (c *urlShortenerClient) BatchShorten(ctx context.Context, in *BatchRequest, opts ...grpc.CallOption) (*BatchResponse, error) {
 	out := new(BatchResponse)
-	err := c.cc.Invoke(ctx, "/internal.grpc.UrlShortener/BatchShorten", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/shortener.UrlShortener/BatchShorten", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +58,7 @@ func (c *urlShortenerClient) BatchShorten(ctx context.Context, in *BatchRequest,
 
 func (c *urlShortenerClient) GetURL(ctx context.Context, in *ShortenerRequest, opts ...grpc.CallOption) (*ShortenerResponse, error) {
 	out := new(ShortenerResponse)
-	err := c.cc.Invoke(ctx, "/internal.grpc.UrlShortener/GetURL", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/shortener.UrlShortener/GetURL", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (c *urlShortenerClient) GetURL(ctx context.Context, in *ShortenerRequest, o
 
 func (c *urlShortenerClient) ListUserUrls(ctx context.Context, in *ListUserUrlsRequest, opts ...grpc.CallOption) (*ListUserUrlsResponse, error) {
 	out := new(ListUserUrlsResponse)
-	err := c.cc.Invoke(ctx, "/internal.grpc.UrlShortener/ListUserUrls", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/shortener.UrlShortener/ListUserUrls", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func (c *urlShortenerClient) ListUserUrls(ctx context.Context, in *ListUserUrlsR
 
 func (c *urlShortenerClient) DeleteUserUrls(ctx context.Context, in *DeleteUserUrlsRequest, opts ...grpc.CallOption) (*DeleteUserUrlsResponse, error) {
 	out := new(DeleteUserUrlsResponse)
-	err := c.cc.Invoke(ctx, "/internal.grpc.UrlShortener/DeleteUserUrls", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/shortener.UrlShortener/DeleteUserUrls", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (c *urlShortenerClient) DeleteUserUrls(ctx context.Context, in *DeleteUserU
 
 func (c *urlShortenerClient) Stat(ctx context.Context, in *StatRequest, opts ...grpc.CallOption) (*StatResponse, error) {
 	out := new(StatResponse)
-	err := c.cc.Invoke(ctx, "/internal.grpc.UrlShortener/Stat", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/shortener.UrlShortener/Stat", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func _UrlShortener_Shorten_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/internal.grpc.UrlShortener/Shorten",
+		FullMethod: "/shortener.UrlShortener/Shorten",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(UrlShortenerServer).Shorten(ctx, req.(*ShortenerRequest))
@@ -168,7 +168,7 @@ func _UrlShortener_BatchShorten_Handler(srv interface{}, ctx context.Context, de
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/internal.grpc.UrlShortener/BatchShorten",
+		FullMethod: "/shortener.UrlShortener/BatchShorten",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(UrlShortenerServer).BatchShorten(ctx, req.(*BatchRequest))
@@ -186,7 +186,7 @@ func _UrlShortener_GetURL_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/internal.grpc.UrlShortener/GetURL",
+		FullMethod: "/shortener.UrlShortener/GetURL",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(UrlShortenerServer).GetURL(ctx, req.(*ShortenerRequest))
@@ -204,7 +204,7 @@ func _UrlShortener_ListUserUrls_Handler(srv interface{}, ctx context.Context, de
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/internal.grpc.UrlShortener/ListUserUrls",
+		FullMethod: "/shortener.UrlShortener/ListUserUrls",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(UrlShortenerServer).ListUserUrls(ctx, req.(*ListUserUrlsRequest))
@@ -222,7 +222,7 @@ func _UrlShortener_DeleteUserUrls_Handler(srv interface{}, ctx context.Context, 
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/internal.grpc.UrlShortener/DeleteUserUrls",
+		FullMethod: "/shortener.UrlShortener/DeleteUserUrls",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(UrlShortenerServer).DeleteUserUrls(ctx, req.(*DeleteUserUrlsRequest))
@@ -240,7 +240,7 @@ func _UrlShortener_Stat_Handler(srv interface{}, ctx context.Context, dec func(i
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/internal.grpc.UrlShortener/Stat",
+		FullMethod: "/shortener.UrlShortener/Stat",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(UrlShortenerServer).Stat(ctx, req.(*StatRequest))
@@ -252,7 +252,7 @@ func _UrlShortener_Stat_Handler(srv interface{}, ctx context.Context, dec func(i
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var UrlShortener_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "internal.grpc.UrlShortener",
+	ServiceName: "shortener.UrlShortener",
 	HandlerType: (*UrlShortenerServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

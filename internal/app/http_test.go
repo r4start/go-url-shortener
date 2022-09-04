@@ -26,8 +26,9 @@ type batchShortenRequest struct {
 
 func testServer(t *testing.T) *HTTPServer {
 	logger, _ := zap.NewDevelopment()
-	s, err := NewURLShortener(context.Background(), logger, WithStorage(storage.NewInMemoryStorage()))
-	assert.Nil(t, err)
+	st := storage.NewInMemoryStorage()
+	s, err := NewURLShortener(context.Background(), logger, WithStorage(st), WithStat(st))
+	assert.NoError(t, err)
 
 	h, err := NewHTTPServer(s, logger)
 	assert.Nil(t, err)
