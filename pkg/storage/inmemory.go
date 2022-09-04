@@ -138,7 +138,7 @@ func (s *syncMapStorage) DeleteURLs(ctx context.Context, userID uint64, ids []ui
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	for id, _ := range idsToDelete {
+	for id := range idsToDelete {
 		s.goneIds[id] = true
 	}
 
