@@ -4,16 +4,16 @@ import (
 	"net"
 )
 
-type HTTPServerConfigurator func(s *HTTPServer)
+type ServerConfigurator func(s *Server)
 
-func WithDomain(domain string) HTTPServerConfigurator {
-	return func(s *HTTPServer) {
+func WithDomain(domain string) ServerConfigurator {
+	return func(s *Server) {
 		s.domain = domain
 	}
 }
 
-func WithTrustedNetwork(network *net.IPNet) HTTPServerConfigurator {
-	return func(s *HTTPServer) {
+func WithTrustedNetwork(network *net.IPNet) ServerConfigurator {
+	return func(s *Server) {
 		s.trustedNet = network
 	}
 }

@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	StorageOperationTimeout = time.Second
+	StorageOperationTimeout = 1800 * time.Second
 
 	UnlimitedWorkers     = -1
 	MaxWorkersPerRequest = 5

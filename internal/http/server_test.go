@@ -27,7 +27,7 @@ type batchShortenRequest struct {
 	OriginalURL   string `json:"original_url"`
 }
 
-func testServer(t *testing.T) *HTTPServer {
+func testServer(t *testing.T) *Server {
 	logger, _ := zap.NewDevelopment()
 	st := storage.NewInMemoryStorage()
 	s, err := app.NewURLShortener(context.Background(), logger, app.WithStorage(st), app.WithStat(st))
@@ -503,7 +503,7 @@ func TestURLShortener_apiUserURLs(t *testing.T) {
 	}
 }
 
-func benchServer() *HTTPServer {
+func benchServer() *Server {
 	logger, _ := zap.NewDevelopment()
 	s, _ := app.NewURLShortener(context.Background(), logger, app.WithStorage(storage.NewInMemoryStorage()))
 

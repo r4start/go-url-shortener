@@ -107,7 +107,7 @@ func (s *syncMapStorage) AddURLs(ctx context.Context, userID uint64, urls []stri
 }
 
 func (s *syncMapStorage) DeleteURLs(ctx context.Context, userID uint64, ids []uint64) error {
-	idsToDelete := make([]uint64, 0, len(ids))
+	idsToDelete := make(map[uint64]bool)
 	userIDs := make(map[uint64]bool)
 
 	s.lock.RLock()
@@ -127,7 +127,7 @@ func (s *syncMapStorage) DeleteURLs(ctx context.Context, userID uint64, ids []ui
 
 	for _, id := range ids {
 		if _, ok := userIDs[id]; ok {
-			idsToDelete = append(idsToDelete, id)
+			idsToDelete[id] = true
 		}
 	}
 
@@ -137,8 +137,18 @@ func (s *syncMapStorage) DeleteURLs(ctx context.Context, userID uint64, ids []ui
 
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	for _, id := range idsToDelete {
+
+	for id, _ := range idsToDelete {
 		s.goneIds[id] = true
+	}
+
+	userData = s.userData[userID]
+	s.userData[userID] = make([]UserData, 0)
+	for _, d := range userData {
+		if idsToDelete[d.ShortURLID] {
+			continue
+		}
+		s.userData[userID] = append(s.userData[userID], d)
 	}
 
 	return nil

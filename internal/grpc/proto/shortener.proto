@@ -15,6 +15,8 @@ service UrlShortener {
   rpc DeleteUserUrls(DeleteUserUrlsRequest) returns (DeleteUserUrlsResponse);
 
   rpc Stat(StatRequest) returns (StatResponse);
+
+  rpc Ping(PingRequest) returns (PingResponse);
 }
 
 message ShortenerRequest {
@@ -73,3 +75,6 @@ message StatResponse {
   uint64 urls = 1;
   uint64 users = 2;
 }
+
+message PingRequest {}
+message PingResponse {}

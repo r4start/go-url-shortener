@@ -27,7 +27,7 @@ type apiRequestData struct {
 	IsIDGenerated bool
 }
 
-type HTTPServer struct {
+type Server struct {
 	*chi.Mux
 	shortener  *app.URLShortener
 	domain     string
@@ -35,8 +35,8 @@ type HTTPServer struct {
 	trustedNet *net.IPNet
 }
 
-func NewHTTPServer(shortener *app.URLShortener, logger *zap.Logger, opts ...HTTPServerConfigurator) (*HTTPServer, error) {
-	handler := &HTTPServer{
+func NewHTTPServer(shortener *app.URLShortener, logger *zap.Logger, opts ...ServerConfigurator) (*Server, error) {
+	handler := &Server{
 		Mux:       chi.NewMux(),
 		shortener: shortener,
 		logger:    logger,
@@ -68,7 +68,7 @@ func NewHTTPServer(shortener *app.URLShortener, logger *zap.Logger, opts ...HTTP
 	return handler, nil
 }
 
-func (s *HTTPServer) shorten(w http.ResponseWriter, r *http.Request) {
+func (s *Server) shorten(w http.ResponseWriter, r *http.Request) {
 	userID, generated, err := s.getUserID(r)
 	if err != nil {
 		s.logger.Error("failed to generate user id", zap.Error(err))
@@ -109,7 +109,7 @@ func (s *HTTPServer) shorten(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *HTTPServer) getURL(w http.ResponseWriter, r *http.Request) {
+func (s *Server) getURL(w http.ResponseWriter, r *http.Request) {
 	keyData := chi.URLParam(r, "id")
 
 	u, err := s.shortener.OriginalURL(r.Context(), keyData)
@@ -126,7 +126,7 @@ func (s *HTTPServer) getURL(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
-func (s *HTTPServer) apiShortener(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiShortener(w http.ResponseWriter, r *http.Request) {
 	var request map[string]string
 
 	reqData, err := s.apiParseRequest(r, &request)
@@ -162,7 +162,7 @@ func (s *HTTPServer) apiShortener(w http.ResponseWriter, r *http.Request) {
 	s.apiWriteResponse(w, reqData, statusCode, response)
 }
 
-func (s *HTTPServer) apiBatchShortener(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiBatchShortener(w http.ResponseWriter, r *http.Request) {
 	type request struct {
 		CorrelationID string `json:"correlation_id"`
 		OriginalURL   string `json:"original_url"`
@@ -208,7 +208,7 @@ func (s *HTTPServer) apiBatchShortener(w http.ResponseWriter, r *http.Request) {
 	s.apiWriteResponse(w, reqData, http.StatusCreated, responseData)
 }
 
-func (s *HTTPServer) apiUserURLs(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, generated, err := s.getUserID(r)
 	if err != nil {
 		s.logger.Error("failed to generate user id", zap.Error(err))
@@ -246,7 +246,7 @@ func (s *HTTPServer) apiUserURLs(w http.ResponseWriter, r *http.Request) {
 	}, http.StatusOK, result)
 }
 
-func (s *HTTPServer) apiDeleteUserURLs(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiDeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	requestData := make([]string, 0)
 	reqData, err := s.apiParseRequest(r, &requestData)
 	if errors.Is(err, ErrBadRequest) {
@@ -274,7 +274,7 @@ func (s *HTTPServer) apiDeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-func (s *HTTPServer) ping(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ping(w http.ResponseWriter, r *http.Request) {
 	if err := s.shortener.Ping(r.Context()); err != nil {
 		s.logger.Error("failed to ping shortener", zap.Error(err))
 		http.Error(w, "", http.StatusInternalServerError)
@@ -284,7 +284,7 @@ func (s *HTTPServer) ping(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *HTTPServer) apiInternalStats(w http.ResponseWriter, r *http.Request) {
+func (s *Server) apiInternalStats(w http.ResponseWriter, r *http.Request) {
 	type response struct {
 		URLs  uint64 `json:"urls"`
 		Users uint64 `json:"users"`
@@ -312,7 +312,7 @@ func (s *HTTPServer) apiInternalStats(w http.ResponseWriter, r *http.Request) {
 	s.apiWriteResponse(w, nil /*apiRequestData*/, http.StatusOK, resp)
 }
 
-func (s *HTTPServer) makeResultURL(r *http.Request, data []byte) string {
+func (s *Server) makeResultURL(r *http.Request, data []byte) string {
 	if len(s.domain) != 0 {
 		return fmt.Sprintf("%s/%s", s.domain, string(data))
 	}
@@ -325,7 +325,7 @@ func (s *HTTPServer) makeResultURL(r *http.Request, data []byte) string {
 	return fmt.Sprintf("%s://%s/%s", protocol, r.Host, string(data))
 }
 
-func (s *HTTPServer) apiParseRequest(r *http.Request, body interface{}) (*apiRequestData, error) {
+func (s *Server) apiParseRequest(r *http.Request, body interface{}) (*apiRequestData, error) {
 	if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
 		s.logger.Error("bad content type", zap.String("content_type", contentType))
 		return nil, ErrBadRequest
@@ -353,7 +353,7 @@ func (s *HTTPServer) apiParseRequest(r *http.Request, body interface{}) (*apiReq
 	}, nil
 }
 
-func (s *HTTPServer) apiWriteResponse(w http.ResponseWriter, reqData *apiRequestData, statusCode int, response interface{}) {
+func (s *Server) apiWriteResponse(w http.ResponseWriter, reqData *apiRequestData, statusCode int, response interface{}) {
 	dst, err := json.Marshal(response)
 	if err != nil {
 		s.logger.Error("failed to marshal response", zap.Error(err))
@@ -377,7 +377,7 @@ func (s *HTTPServer) apiWriteResponse(w http.ResponseWriter, reqData *apiRequest
 	}
 }
 
-func (s *HTTPServer) getUserID(r *http.Request) (uint64, bool, error) {
+func (s *Server) getUserID(r *http.Request) (uint64, bool, error) {
 	userIDCookie, err := r.Cookie(UserIDCookieName)
 	if err == http.ErrNoCookie {
 		return s.shortener.GetUserID(nil)
@@ -388,7 +388,7 @@ func (s *HTTPServer) getUserID(r *http.Request) (uint64, bool, error) {
 	return s.shortener.GetUserID(&userIDCookie.Value)
 }
 
-func (s *HTTPServer) setUserID(w http.ResponseWriter, userID uint64) error {
+func (s *Server) setUserID(w http.ResponseWriter, userID uint64) error {
 	cookieValue, err := s.shortener.GenerateUserID(userID)
 	if err != nil {
 		return err

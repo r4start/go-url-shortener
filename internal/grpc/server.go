@@ -176,6 +176,14 @@ func (s *Server) Stat(ctx context.Context, req *pb.StatRequest) (*pb.StatRespons
 	}, nil
 }
 
+func (s *Server) Ping(ctx context.Context, _ *pb.PingRequest) (*pb.PingResponse, error) {
+	if err := s.shortener.Ping(ctx); err != nil {
+		s.logger.Error("failed to ping shortener", zap.Error(err))
+		return nil, status.Error(codes.Unknown, "")
+	}
+	return &pb.PingResponse{}, nil
+}
+
 type StatAuthorizer func(context.Context, *pb.StatRequest) bool
 
 func DefaultStatAuth(trustedNetwork *net.IPNet) StatAuthorizer {

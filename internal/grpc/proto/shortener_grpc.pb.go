@@ -28,6 +28,7 @@ type UrlShortenerClient interface {
 	ListUserUrls(ctx context.Context, in *ListUserUrlsRequest, opts ...grpc.CallOption) (*ListUserUrlsResponse, error)
 	DeleteUserUrls(ctx context.Context, in *DeleteUserUrlsRequest, opts ...grpc.CallOption) (*DeleteUserUrlsResponse, error)
 	Stat(ctx context.Context, in *StatRequest, opts ...grpc.CallOption) (*StatResponse, error)
+	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
 }
 
 type urlShortenerClient struct {
@@ -92,6 +93,15 @@ func (c *urlShortenerClient) Stat(ctx context.Context, in *StatRequest, opts ...
 	return out, nil
 }
 
+func (c *urlShortenerClient) Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error) {
+	out := new(PingResponse)
+	err := c.cc.Invoke(ctx, "/shortener.UrlShortener/Ping", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // UrlShortenerServer is the server API for UrlShortener service.
 // All implementations must embed UnimplementedUrlShortenerServer
 // for forward compatibility
@@ -102,6 +112,7 @@ type UrlShortenerServer interface {
 	ListUserUrls(context.Context, *ListUserUrlsRequest) (*ListUserUrlsResponse, error)
 	DeleteUserUrls(context.Context, *DeleteUserUrlsRequest) (*DeleteUserUrlsResponse, error)
 	Stat(context.Context, *StatRequest) (*StatResponse, error)
+	Ping(context.Context, *PingRequest) (*PingResponse, error)
 	mustEmbedUnimplementedUrlShortenerServer()
 }
 
@@ -126,6 +137,9 @@ func (UnimplementedUrlShortenerServer) DeleteUserUrls(context.Context, *DeleteUs
 }
 func (UnimplementedUrlShortenerServer) Stat(context.Context, *StatRequest) (*StatResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Stat not implemented")
+}
+func (UnimplementedUrlShortenerServer) Ping(context.Context, *PingRequest) (*PingResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Ping not implemented")
 }
 func (UnimplementedUrlShortenerServer) mustEmbedUnimplementedUrlShortenerServer() {}
 
@@ -248,6 +262,24 @@ func _UrlShortener_Stat_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UrlShortener_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UrlShortenerServer).Ping(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/shortener.UrlShortener/Ping",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UrlShortenerServer).Ping(ctx, req.(*PingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // UrlShortener_ServiceDesc is the grpc.ServiceDesc for UrlShortener service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -278,6 +310,10 @@ var UrlShortener_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Stat",
 			Handler:    _UrlShortener_Stat_Handler,
+		},
+		{
+			MethodName: "Ping",
+			Handler:    _UrlShortener_Ping_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
