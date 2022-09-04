@@ -8,7 +8,7 @@ service UrlShortener {
   rpc Shorten(ShortenerRequest) returns (ShortenerResponse);
   rpc BatchShorten(BatchRequest) returns (BatchResponse);
 
-  rpc GetUrl(ShortenerRequest) returns (ShortenerResponse);
+  rpc GetURL(ShortenerRequest) returns (ShortenerResponse);
 
   rpc ListUserUrls(ListUserUrlsRequest) returns (ListUserUrlsResponse);
 

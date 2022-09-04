@@ -24,7 +24,7 @@ const _ = grpc.SupportPackageIsVersion7
 type UrlShortenerClient interface {
 	Shorten(ctx context.Context, in *ShortenerRequest, opts ...grpc.CallOption) (*ShortenerResponse, error)
 	BatchShorten(ctx context.Context, in *BatchRequest, opts ...grpc.CallOption) (*BatchResponse, error)
-	GetUrl(ctx context.Context, in *ShortenerRequest, opts ...grpc.CallOption) (*ShortenerResponse, error)
+	GetURL(ctx context.Context, in *ShortenerRequest, opts ...grpc.CallOption) (*ShortenerResponse, error)
 	ListUserUrls(ctx context.Context, in *ListUserUrlsRequest, opts ...grpc.CallOption) (*ListUserUrlsResponse, error)
 	DeleteUserUrls(ctx context.Context, in *DeleteUserUrlsRequest, opts ...grpc.CallOption) (*DeleteUserUrlsResponse, error)
 	Stat(ctx context.Context, in *StatRequest, opts ...grpc.CallOption) (*StatResponse, error)
@@ -56,9 +56,9 @@ func (c *urlShortenerClient) BatchShorten(ctx context.Context, in *BatchRequest,
 	return out, nil
 }
 
-func (c *urlShortenerClient) GetUrl(ctx context.Context, in *ShortenerRequest, opts ...grpc.CallOption) (*ShortenerResponse, error) {
+func (c *urlShortenerClient) GetURL(ctx context.Context, in *ShortenerRequest, opts ...grpc.CallOption) (*ShortenerResponse, error) {
 	out := new(ShortenerResponse)
-	err := c.cc.Invoke(ctx, "/shortener.UrlShortener/GetUrl", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/shortener.UrlShortener/GetURL", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (c *urlShortenerClient) Stat(ctx context.Context, in *StatRequest, opts ...
 type UrlShortenerServer interface {
 	Shorten(context.Context, *ShortenerRequest) (*ShortenerResponse, error)
 	BatchShorten(context.Context, *BatchRequest) (*BatchResponse, error)
-	GetUrl(context.Context, *ShortenerRequest) (*ShortenerResponse, error)
+	GetURL(context.Context, *ShortenerRequest) (*ShortenerResponse, error)
 	ListUserUrls(context.Context, *ListUserUrlsRequest) (*ListUserUrlsResponse, error)
 	DeleteUserUrls(context.Context, *DeleteUserUrlsRequest) (*DeleteUserUrlsResponse, error)
 	Stat(context.Context, *StatRequest) (*StatResponse, error)
@@ -115,8 +115,8 @@ func (UnimplementedUrlShortenerServer) Shorten(context.Context, *ShortenerReques
 func (UnimplementedUrlShortenerServer) BatchShorten(context.Context, *BatchRequest) (*BatchResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BatchShorten not implemented")
 }
-func (UnimplementedUrlShortenerServer) GetUrl(context.Context, *ShortenerRequest) (*ShortenerResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetUrl not implemented")
+func (UnimplementedUrlShortenerServer) GetURL(context.Context, *ShortenerRequest) (*ShortenerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetURL not implemented")
 }
 func (UnimplementedUrlShortenerServer) ListUserUrls(context.Context, *ListUserUrlsRequest) (*ListUserUrlsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListUserUrls not implemented")
@@ -176,20 +176,20 @@ func _UrlShortener_BatchShorten_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
-func _UrlShortener_GetUrl_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _UrlShortener_GetURL_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ShortenerRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(UrlShortenerServer).GetUrl(ctx, in)
+		return srv.(UrlShortenerServer).GetURL(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/shortener.UrlShortener/GetUrl",
+		FullMethod: "/shortener.UrlShortener/GetURL",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(UrlShortenerServer).GetUrl(ctx, req.(*ShortenerRequest))
+		return srv.(UrlShortenerServer).GetURL(ctx, req.(*ShortenerRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -264,8 +264,8 @@ var UrlShortener_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _UrlShortener_BatchShorten_Handler,
 		},
 		{
-			MethodName: "GetUrl",
-			Handler:    _UrlShortener_GetUrl_Handler,
+			MethodName: "GetURL",
+			Handler:    _UrlShortener_GetURL_Handler,
 		},
 		{
 			MethodName: "ListUserUrls",

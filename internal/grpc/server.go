@@ -99,7 +99,7 @@ func (s *Server) BatchShorten(ctx context.Context, req *pb.BatchRequest) (*pb.Ba
 	return res, nil
 }
 
-func (s *Server) GetUrl(ctx context.Context, req *pb.ShortenerRequest) (*pb.ShortenerResponse, error) {
+func (s *Server) GetURL(ctx context.Context, req *pb.ShortenerRequest) (*pb.ShortenerResponse, error) {
 	u, err := s.shortener.OriginalURL(ctx, req.Url)
 	if errors.Is(err, storage.ErrDeleted) {
 		return nil, status.Error(http.StatusGone, "")
