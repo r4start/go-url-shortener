@@ -1,4 +1,4 @@
-package app
+package http
 
 import (
 	"encoding/json"
@@ -9,8 +9,11 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/r4start/go-url-shortener/pkg/storage"
+
 	"go.uber.org/zap"
+
+	"github.com/r4start/go-url-shortener/internal/app"
+	"github.com/r4start/go-url-shortener/pkg/storage"
 )
 
 const (
@@ -24,20 +27,15 @@ type apiRequestData struct {
 	IsIDGenerated bool
 }
 
-type deleteData struct {
-	UserID uint64
-	IDs    []string
-}
-
 type HTTPServer struct {
 	*chi.Mux
-	shortener  *URLShortener
+	shortener  *app.URLShortener
 	domain     string
 	logger     *zap.Logger
 	trustedNet *net.IPNet
 }
 
-func NewHTTPServer(shortener *URLShortener, logger *zap.Logger, opts ...HTTPServerConfigurator) (*HTTPServer, error) {
+func NewHTTPServer(shortener *app.URLShortener, logger *zap.Logger, opts ...HTTPServerConfigurator) (*HTTPServer, error) {
 	handler := &HTTPServer{
 		Mux:       chi.NewMux(),
 		shortener: shortener,
@@ -238,7 +236,7 @@ func (s *HTTPServer) apiUserURLs(w http.ResponseWriter, r *http.Request) {
 	result := make([]response, 0)
 	for _, u := range userUrls {
 		result = append(result, response{
-			ShortURL:    s.makeResultURL(r, EncodeID(u.ShortURLID)),
+			ShortURL:    s.makeResultURL(r, app.EncodeID(u.ShortURLID)),
 			OriginalURL: u.OriginalURL,
 		})
 	}

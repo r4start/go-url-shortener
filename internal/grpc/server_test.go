@@ -119,7 +119,7 @@ func TestServer_Shorten(t *testing.T) {
 	assert.Equal(t, codes.AlreadyExists, status.Convert(err).Code())
 }
 
-func TestServer_GetURL(t *testing.T) {
+func TestServer_GetUrl(t *testing.T) {
 	tests := []struct {
 		name    string
 		request *pb.ShortenerRequest
@@ -157,7 +157,7 @@ func TestServer_GetURL(t *testing.T) {
 			assert.NoError(t, err)
 			assert.NotZero(t, len(resp.Url))
 
-			ur, err := client.GetURL(ctx, &pb.ShortenerRequest{Url: resp.Url})
+			ur, err := client.GetUrl(ctx, &pb.ShortenerRequest{Url: resp.Url})
 			assert.NoError(t, err)
 			assert.Equal(t, tt.request.Url, ur.Url)
 		})
@@ -237,7 +237,7 @@ func TestServer_BatchShorten(t *testing.T) {
 				assert.Equal(t, tt.expected[i].CorrelationId, e.CorrelationId)
 				assert.Equal(t, tt.expected[i].Key, e.Key)
 
-				ur, err := client.GetURL(ctx, &pb.ShortenerRequest{Url: e.Key})
+				ur, err := client.GetUrl(ctx, &pb.ShortenerRequest{Url: e.Key})
 				assert.NoError(t, err)
 				assert.Equal(t, tt.request.Urls[i].Url, ur.Url)
 			}

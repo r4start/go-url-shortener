@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	StorageOperationTimeout = 1800 * time.Second
+	StorageOperationTimeout = time.Second
 
 	UnlimitedWorkers     = -1
 	MaxWorkersPerRequest = 5
@@ -38,6 +38,11 @@ type ShortenResult struct {
 type ShortenerStats struct {
 	URLs  uint64
 	Users uint64
+}
+
+type deleteData struct {
+	UserID uint64
+	IDs    []string
 }
 
 type URLShortener struct {

@@ -1,4 +1,4 @@
-package app
+package http
 
 import (
 	"bytes"
@@ -13,10 +13,13 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/r4start/go-url-shortener/pkg/storage"
+
 	"go.uber.org/zap"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/r4start/go-url-shortener/internal/app"
+	"github.com/r4start/go-url-shortener/pkg/storage"
 )
 
 type batchShortenRequest struct {
@@ -27,7 +30,7 @@ type batchShortenRequest struct {
 func testServer(t *testing.T) *HTTPServer {
 	logger, _ := zap.NewDevelopment()
 	st := storage.NewInMemoryStorage()
-	s, err := NewURLShortener(context.Background(), logger, WithStorage(st), WithStat(st))
+	s, err := app.NewURLShortener(context.Background(), logger, app.WithStorage(st), app.WithStat(st))
 	assert.NoError(t, err)
 
 	h, err := NewHTTPServer(s, logger)
@@ -500,56 +503,9 @@ func TestURLShortener_apiUserURLs(t *testing.T) {
 	}
 }
 
-func Test_batchDecodeIDs(t *testing.T) {
-	ids := make([]string, 5000)
-	for i := 0; i < len(ids); i++ {
-		ids[i] = "NWI4NTMwNmZjNWJmMjMzYg"
-	}
-
-	tests := []struct {
-		name         string
-		ids          []string
-		workersCount int
-	}{
-		{
-			name:         "Batch decode check #1",
-			ids:          ids,
-			workersCount: UnlimitedWorkers,
-		},
-		{
-			name:         "Batch decode check #2",
-			ids:          make([]string, 0),
-			workersCount: UnlimitedWorkers,
-		},
-		{
-			name:         "Batch decode check #3",
-			ids:          ids,
-			workersCount: MaxWorkersPerRequest,
-		},
-		{
-			name:         "Batch decode check #4",
-			ids:          ids,
-			workersCount: 17,
-		},
-		{
-			name:         "Batch decode check #5",
-			ids:          ids,
-			workersCount: len(ids) + 10000,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			decodedIds, err := batchDecodeIDs(context.Background(), tt.ids, tt.workersCount)
-			assert.Nil(t, err)
-			assert.Equal(t, len(tt.ids), len(decodedIds))
-		})
-	}
-}
-
 func benchServer() *HTTPServer {
 	logger, _ := zap.NewDevelopment()
-	s, _ := NewURLShortener(context.Background(), logger, WithStorage(storage.NewInMemoryStorage()))
+	s, _ := app.NewURLShortener(context.Background(), logger, app.WithStorage(storage.NewInMemoryStorage()))
 
 	h, _ := NewHTTPServer(s, logger)
 	return h

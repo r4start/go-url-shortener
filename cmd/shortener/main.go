@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	pb "github.com/r4start/go-url-shortener/internal/grpc/proto"
+	http_srv "github.com/r4start/go-url-shortener/internal/http"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -171,8 +172,8 @@ func main() {
 		}
 	}()
 
-	httpHandler, err := app.NewHTTPServer(shortener, logger,
-		app.WithDomain(cfg.BaseURL), app.WithTrustedNetwork(trustedNetwork))
+	httpHandler, err := http_srv.NewHTTPServer(shortener, logger,
+		http_srv.WithDomain(cfg.BaseURL), http_srv.WithTrustedNetwork(trustedNetwork))
 	if err != nil {
 		logger.Fatal("failed to create http server", zap.Error(err))
 	}

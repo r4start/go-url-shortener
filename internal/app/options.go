@@ -2,24 +2,9 @@ package app
 
 import (
 	"database/sql"
-	"net"
 
 	"github.com/r4start/go-url-shortener/pkg/storage"
 )
-
-type HTTPServerConfigurator func(s *HTTPServer)
-
-func WithDomain(domain string) HTTPServerConfigurator {
-	return func(s *HTTPServer) {
-		s.domain = domain
-	}
-}
-
-func WithTrustedNetwork(network *net.IPNet) HTTPServerConfigurator {
-	return func(s *HTTPServer) {
-		s.trustedNet = network
-	}
-}
 
 type ShortenerConfigurator func(s *URLShortener)
 
