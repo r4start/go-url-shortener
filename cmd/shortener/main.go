@@ -8,16 +8,23 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
+	pb "github.com/r4start/go-url-shortener/internal/grpc/proto"
+	http_srv "github.com/r4start/go-url-shortener/internal/http"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
 	_ "github.com/jackc/pgx/v4/stdlib"
 
 	"github.com/r4start/go-url-shortener/internal/app"
+	grpc_srv "github.com/r4start/go-url-shortener/internal/grpc"
 	"github.com/r4start/go-url-shortener/pkg/storage"
 )
 
@@ -40,11 +47,13 @@ const (
 )
 
 type config struct {
-	ServerAddress            string `json:"server_address" env:"SERVER_ADDRESS" envDefault:":8080"`
-	BaseURL                  string `json:"base_url" env:"BASE_URL"`
-	FileStoragePath          string `json:"file_storage_path" env:"FILE_STORAGE_PATH"`
-	DatabaseConnectionString string `json:"database_dsn" env:"DATABASE_DSN"`
-	ServeTLS                 bool   `json:"enable_https" env:"ENABLE_HTTPS"`
+	ServerAddress            string `json:"server_address"`
+	GrpcServerAddress        string `json:"grpc_server_address"`
+	BaseURL                  string `json:"base_url"`
+	FileStoragePath          string `json:"file_storage_path"`
+	DatabaseConnectionString string `json:"database_dsn"`
+	ServeTLS                 bool   `json:"enable_https"`
+	TrustedSubnet            string `json:"trusted_subnet"`
 	configFile               string
 }
 
@@ -54,10 +63,12 @@ func main() {
 	cfg := config{}
 
 	flag.StringVar(&cfg.ServerAddress, "a", os.Getenv("SERVER_ADDRESS"), "")
+	flag.StringVar(&cfg.GrpcServerAddress, "ga", os.Getenv("GRPC_SERVER_ADDRESS"), "")
 	flag.StringVar(&cfg.BaseURL, "b", os.Getenv("BASE_URL"), "")
 	flag.StringVar(&cfg.FileStoragePath, "f", os.Getenv("FILE_STORAGE_PATH"), "")
 	flag.StringVar(&cfg.DatabaseConnectionString, "d", os.Getenv("DATABASE_DSN"), "")
 	flag.StringVar(&cfg.configFile, "c", os.Getenv("CONFIG"), "")
+	flag.StringVar(&cfg.TrustedSubnet, "t", os.Getenv("TRUSTED_SUBNET"), "")
 
 	if _, exists := os.LookupEnv("ENABLE_HTTPS"); exists {
 		flag.BoolVar(&cfg.ServeTLS, "s", true, "")
@@ -90,10 +101,22 @@ func main() {
 		cfg.ServerAddress = ":8080"
 	}
 
+	if len(cfg.GrpcServerAddress) == 0 {
+		cfg.GrpcServerAddress = ":8180"
+	}
+
+	var trustedNetwork *net.IPNet = nil
+	if len(cfg.TrustedSubnet) != 0 {
+		_, trustedNetwork, err = net.ParseCIDR(cfg.TrustedSubnet)
+		if err != nil {
+			logger.Fatal("failed to parse trusted subnet", zap.Error(err))
+		}
+	}
+
 	storageContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	st, dbConn, err := createStorage(storageContext, &cfg)
+	st, stat, dbConn, err := createStorage(storageContext, &cfg)
 	if err != nil {
 		logger.Fatal("failed to create a storage", zap.Error(err))
 	}
@@ -107,16 +130,10 @@ func main() {
 	serverContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	handler, err := app.NewURLShortener(serverContext, dbConn, cfg.BaseURL, st, logger)
+	shortener, err := app.NewURLShortener(serverContext, logger,
+		app.WithDatabase(dbConn), app.WithStorage(st), app.WithStat(stat))
 	if err != nil {
-		logger.Fatal("failed to create a storage", zap.Error(err))
-	}
-
-	server := &http.Server{Addr: cfg.ServerAddress, Handler: handler}
-
-	sCh, err := prepareShutdown(server, logger)
-	if err != nil {
-		logger.Fatal("failed to prepare shutdown", zap.Error(err))
+		logger.Fatal("failed to create shortener", zap.Error(err))
 	}
 
 	if cfg.ServeTLS {
@@ -126,6 +143,49 @@ func main() {
 		if err := prepareTLSFile(serverCertFileName, serverCert); err != nil {
 			logger.Fatal("failed to create a cert file", zap.Error(err))
 		}
+	}
+
+	grpcShortener := grpc_srv.NewServer(shortener, "", logger,
+		grpc_srv.DefaultStatAuth(trustedNetwork))
+
+	var creds credentials.TransportCredentials
+	if cfg.ServeTLS {
+		creds, err = credentials.NewServerTLSFromFile(serverCertFileName, serverKeyFileName)
+		if err != nil {
+			logger.Fatal("failed to prepare grpc transport creds", zap.Error(err))
+		}
+	} else {
+		creds = insecure.NewCredentials()
+	}
+
+	grpcServer := grpc.NewServer(grpc.Creds(creds))
+	pb.RegisterUrlShortenerServer(grpcServer, grpcShortener)
+
+	go func() {
+		listener, err := net.Listen("tcp", cfg.GrpcServerAddress)
+		if err != nil {
+			logger.Fatal("failed to start grpc listener", zap.Error(err))
+		}
+
+		if err := grpcServer.Serve(listener); err != nil {
+			logger.Fatal("failed to serve grpc", zap.Error(err))
+		}
+	}()
+
+	httpHandler, err := http_srv.NewHTTPServer(shortener, logger,
+		http_srv.WithDomain(cfg.BaseURL), http_srv.WithTrustedNetwork(trustedNetwork))
+	if err != nil {
+		logger.Fatal("failed to create http server", zap.Error(err))
+	}
+
+	server := &http.Server{Addr: cfg.ServerAddress, Handler: httpHandler}
+
+	sCh, err := prepareShutdown(server, grpcServer, logger)
+	if err != nil {
+		logger.Fatal("failed to prepare shutdown", zap.Error(err))
+	}
+
+	if cfg.ServeTLS {
 		err = server.ListenAndServeTLS(serverCertFileName, serverKeyFileName)
 	} else {
 		err = server.ListenAndServe()
@@ -140,15 +200,21 @@ func main() {
 	fmt.Println("Server stopped")
 }
 
-func createStorage(ctx context.Context, cfg *config) (storage.URLStorage, *sql.DB, error) {
+func createStorage(ctx context.Context, cfg *config) (storage.URLStorage, storage.ServiceStat, *sql.DB, error) {
 	var st storage.URLStorage = nil
+	var stat storage.ServiceStat = nil
 	var dbConn *sql.DB = nil
 	var err error = nil
 
 	if len(cfg.DatabaseConnectionString) != 0 {
 		dbConn, err = sql.Open("pgx", cfg.DatabaseConnectionString)
 		if err == nil {
-			st, err = storage.NewDatabaseStorage(ctx, dbConn)
+			ds, err := storage.NewDatabaseStorage(ctx, dbConn)
+			if err != nil {
+				return nil, nil, dbConn, err
+			}
+			st = ds
+			stat = ds
 		}
 	} else if len(cfg.FileStoragePath) != 0 {
 		st, err = storage.NewFileStorage(cfg.FileStoragePath)
@@ -156,7 +222,7 @@ func createStorage(ctx context.Context, cfg *config) (storage.URLStorage, *sql.D
 		st = storage.NewInMemoryStorage()
 	}
 
-	return st, dbConn, err
+	return st, stat, dbConn, err
 }
 
 func printStartupMessage() {
@@ -203,7 +269,7 @@ func loadConfigFromFile(filePath string) (*config, error) {
 	return &result, err
 }
 
-func prepareShutdown(server *http.Server, logger *zap.Logger) (<-chan interface{}, error) {
+func prepareShutdown(server *http.Server, grpcServer *grpc.Server, logger *zap.Logger) (<-chan interface{}, error) {
 	shutdownSig := make(chan interface{})
 	signals := make(chan os.Signal, 1)
 
@@ -217,6 +283,8 @@ func prepareShutdown(server *http.Server, logger *zap.Logger) (<-chan interface{
 		if err := server.Shutdown(context.Background()); err != nil {
 			logger.Error("failed to shutdown a server", zap.Error(err))
 		}
+
+		grpcServer.GracefulStop()
 
 		close(shutdownSig)
 	}()

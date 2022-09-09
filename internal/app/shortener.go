@@ -10,16 +10,13 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
+	"net"
 	"net/url"
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/r4start/go-url-shortener/pkg/storage"
 	"go.uber.org/zap"
 
@@ -27,19 +24,20 @@ import (
 )
 
 const (
-	UserIDCookieName = "gusid"
-
-	StorageOperationTimeout = time.Second
+	StorageOperationTimeout = 1800 * time.Second
 
 	UnlimitedWorkers     = -1
 	MaxWorkersPerRequest = 5
 )
 
-var ErrBadRequest = errors.New("bad request")
+type ShortenResult struct {
+	Exists bool
+	Key    []byte
+}
 
-type apiRequestData struct {
-	UserID        uint64
-	IsIDGenerated bool
+type ShortenerStats struct {
+	URLs  uint64
+	Users uint64
 }
 
 type deleteData struct {
@@ -48,18 +46,18 @@ type deleteData struct {
 }
 
 type URLShortener struct {
-	*chi.Mux
 	urlStorage storage.URLStorage
-	domain     string
+	stat       storage.ServiceStat
 	gcm        cipher.AEAD
 	privateKey []byte
 	db         *sql.DB
 	logger     *zap.Logger
 	deleteCtx  context.Context
 	deleteChan chan deleteData
+	trustedNet *net.IPNet
 }
 
-func NewURLShortener(ctx context.Context, db *sql.DB, domain string, st storage.URLStorage, logger *zap.Logger) (*URLShortener, error) {
+func NewURLShortener(ctx context.Context, logger *zap.Logger, opts ...ShortenerConfigurator) (*URLShortener, error) {
 	privateKey := make([]byte, 32)
 	readBytes, err := rand.Read(privateKey)
 	if err != nil || readBytes != len(privateKey) {
@@ -76,298 +74,120 @@ func NewURLShortener(ctx context.Context, db *sql.DB, domain string, st storage.
 	}
 
 	handler := &URLShortener{
-		Mux:        chi.NewMux(),
-		urlStorage: st,
-		domain:     domain,
 		gcm:        aead,
 		privateKey: privateKey,
-		db:         db,
 		logger:     logger,
 		deleteCtx:  ctx,
 		deleteChan: make(chan deleteData),
 	}
 
-	handler.Use(DecompressGzip)
-	handler.Use(CompressGzip)
-
-	handler.Get("/{id}", handler.getURL)
-	handler.Get("/ping", handler.ping)
-
-	handler.Get("/api/user/urls", handler.apiUserURLs)
-	handler.Delete("/api/user/urls", handler.apiDeleteUserURLs)
-
-	handler.Post("/", handler.shorten)
-	handler.Post("/api/shorten", handler.apiShortener)
-	handler.Post("/api/shorten/batch", handler.apiBatchShortener)
-
-	handler.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "", http.StatusBadRequest)
-	})
+	for _, o := range opts {
+		o(handler)
+	}
 
 	go handler.deleteIDs()
 
 	return handler, nil
 }
 
-func (h *URLShortener) shorten(w http.ResponseWriter, r *http.Request) {
-	userID, generated, err := h.getUserID(r)
-	if err != nil {
-		h.logger.Error("failed to generate user id", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
-	b, err := io.ReadAll(r.Body)
-	if err != nil {
-		h.logger.Error("failed to read request body", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
+func (u *URLShortener) Shorten(ctx context.Context, userID uint64, url string) (*ShortenResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, StorageOperationTimeout)
 	defer cancel()
 
-	dst, exists, err := h.generateShortID(ctx, userID, string(b))
+	dst, exists, err := u.generateShortID(ctx, userID, url)
 	if err != nil {
-		h.logger.Error("failed to generate short id", zap.Error(err))
-		http.Error(w, "", http.StatusBadRequest)
-		return
+		return nil, err
 	}
 
-	if generated {
-		if err := h.setUserID(w, userID); err != nil {
-			h.logger.Error("failed to set user id", zap.Error(err))
-			http.Error(w, "", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	if !exists {
-		w.WriteHeader(http.StatusCreated)
-	} else {
-		w.WriteHeader(http.StatusConflict)
-	}
-
-	if _, err := w.Write([]byte(h.makeResultURL(r, dst))); err != nil {
-		h.logger.Error("failed to write response body", zap.Error(err))
-	}
+	return &ShortenResult{
+		Exists: exists,
+		Key:    dst,
+	}, nil
 }
 
-func (h *URLShortener) getURL(w http.ResponseWriter, r *http.Request) {
-	keyData := chi.URLParam(r, "id")
-	key, err := decodeID(keyData)
+func (u *URLShortener) OriginalURL(ctx context.Context, urlID string) (string, error) {
+	key, err := decodeID(urlID)
 	if err != nil {
-		h.logger.Error("failed to decode short id", zap.Error(err), zap.String("id", keyData))
-		http.Error(w, "", http.StatusBadRequest)
-		return
+		return "", err
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, StorageOperationTimeout)
 	defer cancel()
 
-	u, err := h.urlStorage.Get(ctx, key)
-	if err == storage.ErrDeleted {
-		w.WriteHeader(http.StatusGone)
-		return
-	}
-
-	if err != nil {
-		h.logger.Error("failed to retrieve data from storage", zap.Error(err), zap.Uint64("key", key))
-		http.Error(w, "", http.StatusNotFound)
-		return
-	}
-
-	w.Header().Set("Location", u)
-	w.WriteHeader(http.StatusTemporaryRedirect)
+	return u.urlStorage.Get(ctx, key)
 }
 
-func (h *URLShortener) apiShortener(w http.ResponseWriter, r *http.Request) {
-	var request map[string]string
-
-	reqData, err := h.apiParseRequest(r, &request)
-	if errors.Is(err, ErrBadRequest) {
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	} else if err != nil {
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
-	urlToShorten, ok := request["url"]
-	if !ok {
-		h.logger.Error("empty url in request body")
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
+func (u *URLShortener) BatchShorten(ctx context.Context, userID uint64, urls []string) ([][]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, StorageOperationTimeout)
 	defer cancel()
 
-	dst, exists, err := h.generateShortID(ctx, reqData.UserID, urlToShorten)
-	if err != nil {
-		h.logger.Error("failed to generate short id", zap.Error(err))
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-
-	response := make(map[string]string)
-	response["result"] = h.makeResultURL(r, dst)
-
-	statusCode := http.StatusCreated
-	if exists {
-		statusCode = http.StatusConflict
-	}
-	h.apiWriteResponse(w, reqData, statusCode, response)
+	return u.generateShortIDs(ctx, userID, urls)
 }
 
-func (h *URLShortener) apiBatchShortener(w http.ResponseWriter, r *http.Request) {
-	type request struct {
-		CorrelationID string `json:"correlation_id"`
-		OriginalURL   string `json:"original_url"`
-	}
-
-	type response struct {
-		CorrelationID string `json:"correlation_id"`
-		ShortURL      string `json:"short_url"`
-	}
-
-	requestData := make([]request, 0)
-	reqData, err := h.apiParseRequest(r, &requestData)
-	if errors.Is(err, ErrBadRequest) {
-		h.logger.Error("bad request", zap.Error(err))
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	} else if err != nil {
-		h.logger.Error("failed to parse request", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
-	urls := make([]string, 0, len(requestData))
-	for _, e := range requestData {
-		urls = append(urls, e.OriginalURL)
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
+func (u *URLShortener) UserURLs(ctx context.Context, userID uint64) ([]storage.UserData, error) {
+	ctx, cancel := context.WithTimeout(ctx, StorageOperationTimeout)
 	defer cancel()
-
-	encodedIds, err := h.generateShortIDs(ctx, reqData.UserID, urls)
-	if err != nil {
-		h.logger.Error("failed to generate short ids", zap.Error(err))
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-
-	responseData := make([]response, 0, len(encodedIds))
-	for i, dst := range encodedIds {
-		responseData = append(responseData, response{
-			CorrelationID: requestData[i].CorrelationID,
-			ShortURL:      h.makeResultURL(r, dst),
-		})
-	}
-
-	h.apiWriteResponse(w, reqData, http.StatusCreated, responseData)
+	return u.urlStorage.GetUserData(ctx, userID)
 }
 
-func (h *URLShortener) apiUserURLs(w http.ResponseWriter, r *http.Request) {
-	userID, generated, err := h.getUserID(r)
-	if err != nil {
-		h.logger.Error("failed to generate user id", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
-	if generated {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
-	defer cancel()
-	userUrls, err := h.urlStorage.GetUserData(ctx, userID)
-	if err != nil {
-		h.logger.Error("failed to get user data", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
-	type response struct {
-		ShortURL    string `json:"short_url"`
-		OriginalURL string `json:"original_url"`
-	}
-
-	result := make([]response, 0)
-	for _, u := range userUrls {
-		result = append(result, response{
-			ShortURL:    h.makeResultURL(r, encodeID(u.ShortURLID)),
-			OriginalURL: u.OriginalURL,
-		})
-	}
-
-	h.apiWriteResponse(w, &apiRequestData{
+func (u *URLShortener) DeleteUserURLs(_ context.Context, userID uint64, ids []string) error {
+	u.deleteChan <- deleteData{
 		UserID: userID,
-	}, http.StatusOK, result)
+		IDs:    ids,
+	}
+	return nil
 }
 
-func (h *URLShortener) apiDeleteUserURLs(w http.ResponseWriter, r *http.Request) {
-	requestData := make([]string, 0)
-	reqData, err := h.apiParseRequest(r, &requestData)
-	if errors.Is(err, ErrBadRequest) {
-		h.logger.Error("bad request", zap.Error(err))
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	} else if err != nil {
-		h.logger.Error("failed to parse request", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
+func (u *URLShortener) Ping(ctx context.Context) error {
+	if u.db == nil {
+		return fmt.Errorf("no db configured")
 	}
 
-	if reqData.IsIDGenerated {
-		h.logger.Error("unknown user id")
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-
-	h.deleteChan <- deleteData{
-		UserID: reqData.UserID,
-		IDs:    requestData,
-	}
-
-	w.WriteHeader(http.StatusAccepted)
-}
-
-func (h *URLShortener) ping(w http.ResponseWriter, r *http.Request) {
-	if h.db == nil {
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), StorageOperationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, StorageOperationTimeout)
 	defer cancel()
-	if err := h.db.PingContext(ctx); err != nil {
-		h.logger.Error("failed to ping database", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
 
-	w.WriteHeader(http.StatusOK)
+	return u.db.PingContext(ctx)
 }
 
-func (h *URLShortener) generateShortID(ctx context.Context, userID uint64, data string) ([]byte, bool, error) {
-	u, err := url.Parse(data)
-	if err != nil || len(u.Hostname()) == 0 {
+func (u *URLShortener) Stat(ctx context.Context) (*ShortenerStats, error) {
+	if u.stat == nil {
+		return &ShortenerStats{}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, StorageOperationTimeout)
+	defer cancel()
+
+	urls, err := u.stat.TotalURLs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	users, err := u.stat.TotalUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ShortenerStats{
+		URLs:  urls,
+		Users: users,
+	}, nil
+}
+
+func (u *URLShortener) generateShortID(ctx context.Context, userID uint64, data string) ([]byte, bool, error) {
+	parsedURL, err := url.Parse(data)
+	if err != nil || len(parsedURL.Hostname()) == 0 {
 		return nil, false, errors.New("bad input data")
 	}
 
-	key, exists, err := h.urlStorage.Add(ctx, userID, u.String())
+	key, exists, err := u.urlStorage.Add(ctx, userID, parsedURL.String())
 	if err != nil {
 		return nil, false, err
 	}
 
-	return encodeID(key), exists, nil
+	return EncodeID(key), exists, nil
 }
 
-func (h *URLShortener) generateShortIDs(ctx context.Context, userID uint64, urls []string) ([][]byte, error) {
+func (u *URLShortener) generateShortIDs(ctx context.Context, userID uint64, urls []string) ([][]byte, error) {
 	for _, data := range urls {
 		u, err := url.Parse(data)
 		if err != nil || len(u.Hostname()) == 0 {
@@ -375,60 +195,43 @@ func (h *URLShortener) generateShortIDs(ctx context.Context, userID uint64, urls
 		}
 	}
 
-	results, err := h.urlStorage.AddURLs(ctx, userID, urls)
+	results, err := u.urlStorage.AddURLs(ctx, userID, urls)
 	if err != nil {
 		return nil, err
 	}
 
 	ids := make([][]byte, 0)
 	for _, key := range results {
-		ids = append(ids, encodeID(key.ID))
+		ids = append(ids, EncodeID(key.ID))
 	}
 
 	return ids, nil
 }
 
-func (h *URLShortener) makeResultURL(r *http.Request, data []byte) string {
-	if len(h.domain) != 0 {
-		return fmt.Sprintf("%s/%s", h.domain, string(data))
-	}
-
-	protocol := "http"
-	if r.TLS != nil {
-		protocol = "https"
-	}
-
-	return fmt.Sprintf("%s://%s/%s", protocol, r.Host, string(data))
-}
-
-func (h *URLShortener) getUserID(r *http.Request) (uint64, bool, error) {
-	userIDCookie, err := r.Cookie(UserIDCookieName)
-
-	if err == http.ErrNoCookie {
+func (u *URLShortener) GetUserID(rawValue *string) (uint64, bool, error) {
+	if rawValue == nil {
 		id, err := cryptoRandUint64()
 		if err != nil {
 			return 0, false, err
 		}
 		return id, true, nil
-	} else if err != nil {
-		return 0, false, err
 	}
 
 	encoder := base64.URLEncoding.WithPadding(base64.NoPadding)
-	data, err := encoder.DecodeString(userIDCookie.Value)
+	data, err := encoder.DecodeString(*rawValue)
 	if err != nil {
 		return 0, false, err
 	}
 
-	hasher := hmac.New(sha256.New, h.privateKey)
+	hasher := hmac.New(sha256.New, u.privateKey)
 
-	if len(data) < h.gcm.NonceSize()+hasher.Size()+1 {
+	if len(data) < u.gcm.NonceSize()+hasher.Size()+1 {
 		return 0, false, errors.New("data size is too small")
 	}
 
 	sign := data[:hasher.Size()]
-	nonce := data[hasher.Size() : hasher.Size()+h.gcm.NonceSize()]
-	text := data[hasher.Size()+h.gcm.NonceSize():]
+	nonce := data[hasher.Size() : hasher.Size()+u.gcm.NonceSize()]
+	text := data[hasher.Size()+u.gcm.NonceSize():]
 
 	hasher.Write(data[hasher.Size():])
 	msgSign := hasher.Sum(nil)
@@ -442,7 +245,7 @@ func (h *URLShortener) getUserID(r *http.Request) (uint64, bool, error) {
 	}
 
 	var rawID []byte
-	uid, err := h.gcm.Open(rawID, nonce, text, nil)
+	uid, err := u.gcm.Open(rawID, nonce, text, nil)
 	if err != nil {
 		return 0, false, err
 	}
@@ -450,109 +253,55 @@ func (h *URLShortener) getUserID(r *http.Request) (uint64, bool, error) {
 	return binary.BigEndian.Uint64(uid[:binary.MaxVarintLen64]), false, nil
 }
 
-func (h *URLShortener) setUserID(w http.ResponseWriter, userID uint64) error {
-	nonce := make([]byte, h.gcm.NonceSize())
+func (u *URLShortener) GenerateUserID(userID uint64) (*string, error) {
+	nonce := make([]byte, u.gcm.NonceSize())
 
 	readBytes, err := rand.Read(nonce)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if readBytes != len(nonce) {
-		return errors.New("not enough entropy")
+		return nil, errors.New("not enough entropy")
 	}
 
 	text := make([]byte, binary.MaxVarintLen64)
 	binary.BigEndian.PutUint64(text, userID)
 
 	var dst []byte
-	cipherText := h.gcm.Seal(dst, nonce, text, nil)
+	cipherText := u.gcm.Seal(dst, nonce, text, nil)
 	cipherText = append(nonce, cipherText...)
 
-	hasher := hmac.New(sha256.New, h.privateKey)
+	hasher := hmac.New(sha256.New, u.privateKey)
 	hasher.Write(cipherText)
 	sum := hasher.Sum(nil)
 
 	cipherText = append(sum, cipherText...)
 	encoder := base64.URLEncoding.WithPadding(base64.NoPadding)
-
-	w.Header().Set("set-cookie", fmt.Sprintf(`%s=%s; Path=/`, UserIDCookieName, encoder.EncodeToString(cipherText)))
-
-	return nil
+	result := encoder.EncodeToString(cipherText)
+	return &result, nil
 }
 
-func (h *URLShortener) apiParseRequest(r *http.Request, body interface{}) (*apiRequestData, error) {
-	if contentType := r.Header.Get("Content-Type"); contentType != "application/json" {
-		h.logger.Error("bad content type", zap.String("content_type", contentType))
-		return nil, ErrBadRequest
-	}
-
-	userID, generated, err := h.getUserID(r)
-	if err != nil {
-		h.logger.Error("failed to generate user id", zap.Error(err))
-		return nil, err
-	}
-
-	b, err := io.ReadAll(r.Body)
-	if err != nil {
-		h.logger.Error("failed to read request body", zap.Error(err))
-		return nil, err
-	}
-
-	if err = json.Unmarshal(b, &body); err != nil {
-		h.logger.Error("failed to unmarshal request json", zap.Error(err))
-		return nil, ErrBadRequest
-	}
-	return &apiRequestData{
-		UserID:        userID,
-		IsIDGenerated: generated,
-	}, nil
-}
-
-func (h *URLShortener) apiWriteResponse(w http.ResponseWriter, reqData *apiRequestData, statusCode int, response interface{}) {
-	dst, err := json.Marshal(response)
-	if err != nil {
-		h.logger.Error("failed to marshal response", zap.Error(err))
-		http.Error(w, "", http.StatusInternalServerError)
-		return
-	}
-
-	if reqData.IsIDGenerated {
-		if err := h.setUserID(w, reqData.UserID); err != nil {
-			h.logger.Error("failed to set user id", zap.Error(err))
-			http.Error(w, "", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-
-	if _, err := w.Write(dst); err != nil {
-		h.logger.Error("failed to write response body", zap.Error(err))
-	}
-}
-
-func (h *URLShortener) deleteIDs() {
+func (u *URLShortener) deleteIDs() {
 	for {
 		select {
-		case <-h.deleteCtx.Done():
+		case <-u.deleteCtx.Done():
 			return
-		case data := <-h.deleteChan:
-			decodedIDs, err := batchDecodeIDs(h.deleteCtx, data.IDs, MaxWorkersPerRequest)
+		case data := <-u.deleteChan:
+			decodedIDs, err := batchDecodeIDs(u.deleteCtx, data.IDs, MaxWorkersPerRequest)
 			if err != nil {
-				h.logger.Error("failed to decode short ids", zap.Error(err))
+				u.logger.Error("failed to decode short ids", zap.Error(err))
 				continue
 			}
 
-			if err := h.urlStorage.DeleteURLs(h.deleteCtx, data.UserID, decodedIDs); err != nil {
-				h.logger.Error("failed to delete urls", zap.Error(err))
+			if err := u.urlStorage.DeleteURLs(u.deleteCtx, data.UserID, decodedIDs); err != nil {
+				u.logger.Error("failed to delete urls", zap.Error(err))
 			}
 		}
 	}
 }
 
-func encodeID(id uint64) []byte {
+func EncodeID(id uint64) []byte {
 	keyData := []byte(strconv.FormatUint(id, 16))
 	dst := make([]byte, base64.RawURLEncoding.EncodedLen(len(keyData)))
 	base64.RawURLEncoding.Encode(dst, keyData)

@@ -29,6 +29,12 @@ type AddResult struct {
 	Inserted bool
 }
 
+type Closer interface {
+	// Close - close URLStorage. Should be called in the end of lifetime.
+	// An implementation may clean up necessary resources here.
+	Close() error
+}
+
 // URLStorage - interface that every storage has to implement.
 type URLStorage interface {
 	// Add - add an url for a userID.
@@ -41,7 +47,13 @@ type URLStorage interface {
 	Get(ctx context.Context, id uint64) (string, error)
 	// GetUserData - get all user shortened URLs.
 	GetUserData(ctx context.Context, userID uint64) ([]UserData, error)
-	// Close - close URLStorage. Should be called in the end of lifetime.
-	// An implementation may cleanup necessary resources here.
-	Close() error
+
+	Closer
+}
+
+type ServiceStat interface {
+	TotalUsers(ctx context.Context) (uint64, error)
+	TotalURLs(ctx context.Context) (uint64, error)
+
+	Closer
 }

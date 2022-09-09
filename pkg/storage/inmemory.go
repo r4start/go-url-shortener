@@ -5,6 +5,11 @@ import (
 	"sync"
 )
 
+var (
+	_ URLStorage  = (*syncMapStorage)(nil)
+	_ ServiceStat = (*syncMapStorage)(nil)
+)
+
 type syncMapStorage struct {
 	urls     map[uint64]string
 	userData map[uint64][]UserData
@@ -13,7 +18,7 @@ type syncMapStorage struct {
 }
 
 // NewInMemoryStorage creates URLStorage implementation that doesn't have any persistent storage.
-func NewInMemoryStorage() URLStorage {
+func NewInMemoryStorage() *syncMapStorage {
 	return &syncMapStorage{
 		urls:     make(map[uint64]string),
 		userData: make(map[uint64][]UserData),
@@ -102,7 +107,7 @@ func (s *syncMapStorage) AddURLs(ctx context.Context, userID uint64, urls []stri
 }
 
 func (s *syncMapStorage) DeleteURLs(ctx context.Context, userID uint64, ids []uint64) error {
-	idsToDelete := make([]uint64, 0, len(ids))
+	idsToDelete := make(map[uint64]bool)
 	userIDs := make(map[uint64]bool)
 
 	s.lock.RLock()
@@ -122,7 +127,7 @@ func (s *syncMapStorage) DeleteURLs(ctx context.Context, userID uint64, ids []ui
 
 	for _, id := range ids {
 		if _, ok := userIDs[id]; ok {
-			idsToDelete = append(idsToDelete, id)
+			idsToDelete[id] = true
 		}
 	}
 
@@ -132,8 +137,18 @@ func (s *syncMapStorage) DeleteURLs(ctx context.Context, userID uint64, ids []ui
 
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	for _, id := range idsToDelete {
+
+	for id := range idsToDelete {
 		s.goneIds[id] = true
+	}
+
+	userData = s.userData[userID]
+	s.userData[userID] = make([]UserData, 0)
+	for _, d := range userData {
+		if idsToDelete[d.ShortURLID] {
+			continue
+		}
+		s.userData[userID] = append(s.userData[userID], d)
 	}
 
 	return nil
@@ -175,4 +190,16 @@ func (s *syncMapStorage) GetUserData(ctx context.Context, userID uint64) ([]User
 
 func (s *syncMapStorage) Close() error {
 	return nil
+}
+
+func (s *syncMapStorage) TotalUsers(context.Context) (uint64, error) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	return uint64(len(s.userData)), nil
+}
+
+func (s *syncMapStorage) TotalURLs(context.Context) (uint64, error) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	return uint64(len(s.urls) - len(s.goneIds)), nil
 }
